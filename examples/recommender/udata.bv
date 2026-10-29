@@ -102,5 +102,12 @@ defn udata_print_record(record: UDataRecord)
 
 defn udata_print(records: List<UDataRecord>, idx: Int, text: String) -> String {
     when idx >= records .^Length { term text; };
+    when !(records[idx].user_idx >= 0) { trap; };
+    when !(records[idx].user_idx < 943) { trap; };
+    when !(records[idx].item_idx >= 0) { trap; };
+    when !(records[idx].item_idx < 1682) { trap; };
+    when !(records[idx].rating >= 1) { trap; };
+    when !(records[idx].rating <= 5) { trap; };
+    when !(records[idx].timestamp >= 0) { trap; };
     term udata_print(records, idx + 1, text + udata_print_record(records[idx]));
 };

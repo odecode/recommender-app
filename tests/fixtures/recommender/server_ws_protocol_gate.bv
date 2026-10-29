@@ -4,8 +4,8 @@
 import "./server_test_support.bv";
 
 defn ws_bad_frame(state: ServerState, wire: String, code: Int) -> TestExchange {
-    let registered: TestExchange = test_http(state,"POST","/register","{\"username\":\"protocol\",\"password\":\"secret\"}");
-    let logged: TestExchange = test_http(registered.server,"POST","/login","{\"username\":\"protocol\",\"password\":\"secret\"}");
+    let registered: TestExchange = test_http(state,"POST","/register","{\"username\":\"protocol\",\"password\":\"protocol-secret\"}");
+    let logged: TestExchange = test_http(registered.server,"POST","/login","{\"username\":\"protocol\",\"password\":\"protocol-secret\"}");
     let token: String = api_input(test_body(logged.response)).token;
     let socket: Socket = sock_tcp();
     let connected: Int = sock_connect(socket,LOOPBACK,test_port(state.reactor.listener));

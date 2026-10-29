@@ -5,12 +5,15 @@ import "./server_live.bv";
 
 defn server_http(state: ServerState, slot: Int) -> ServerState {
     let input: ByteBuf = io_buffer(state.reactor,slot);
+    when !((input.len >= 0)) { trap; };
+    when !((input.len <= input.len)) { trap; };
     let size: Int = io_http_size(input);
     when size == -2 { io_http_reply(state.reactor,slot,400,"{\"error\":\"invalid-request\"}"); term state; };
     when size == -3 || (size == -1 && input.len == SERVER_INPUT_LIMIT) {
         io_http_reply(state.reactor,slot,413,"{\"error\":\"request-too-large\"}"); term state;
     };
     when size < 0 || size > input.len { term state; };
+
     let parsed: HttpParse = http_parse_request(input,input.len);
     when parsed.status != HTTP_COMPLETE { term state; };
     io_consume(state.reactor,slot,parsed.consumed);
@@ -61,6 +64,8 @@ defn server_http(state: ServerState, slot: Int) -> ServerState {
 };
 
 defn server_advance(state: ServerState, slot: Int) -> ServerState {
+    when !(slot >= 0) { trap; };
+    when !(slot < state.reactor.capacity) { trap; };
     let row: Int = reactor_row(state.reactor,slot);
     when Load#(row,8) < 0 { term server_forget_live_session(state,slot); };
     let events: Int = reactor_events(state.reactor,slot);

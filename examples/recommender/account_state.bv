@@ -13,6 +13,16 @@ defn account_state_failure(error: String, detail: PgResult) -> AccountState {
 
 defn account_state_ratings(rows: PgResult, identity: AccountResult, idx: Int, ratings: List<AccountRating>) -> AccountState {
     when idx >= rows.nrows { term AccountState { result: identity, ratings: ratings }; };
+    when !(((idx >= 0) && (idx < rows.nrows))) { trap; };
+    when !((5 < rows.ncols)) { trap; };
+    when !((idx >= 0)) { trap; };
+    when !((idx < rows.nrows)) { trap; };
+    when !((4 < rows.ncols)) { trap; };
+    when !((3 < rows.ncols)) { trap; };
+    when !(idx >= 0) { trap; };
+    when !(idx < rows.nrows) { trap; };
+    when !(2 < rows.ncols) { trap; };
+
     let owner: Int = pg_row_int(rows,idx,2);
     let item: Int = pg_row_int(rows,idx,3);
     let rating: Int = pg_row_int(rows,idx,4);
@@ -44,6 +54,9 @@ defn account_state(conn: PgConn, sessions: SessionStore, token: String) -> Accou
     when rows.nrows == 0 {
         term account_state_failure("auth-failed",store_error("Session account no longer exists; log in again."));
     };
+    when !((0 < rows.nrows)) { trap; };
+    when !((0 < rows.ncols)) { trap; };
+
     when rows.ncols != 6 || rows.nrows > 1682 || pg_row_int(rows,0,0) != id {
         term account_state_failure("database",store_error("Expected an account-scoped rating snapshot; check the database schema."));
     };

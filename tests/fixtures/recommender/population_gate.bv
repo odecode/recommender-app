@@ -4,7 +4,7 @@
 import "../../../examples/recommender/baseline_population.bv";
 import "std/env.bv";
 
-defn population_sum_count(values: Vector, count: Int, idx: Int, total: Float) -> Float {
+defn population_sum_count(values: FloatVector, count: Int, idx: Int, total: Float) -> Float {
     when idx >= count { term total; };
     term population_sum_count(values, count, idx + 1, total + vec_get(values, idx));
 };

@@ -14,14 +14,15 @@ import { Ok, Err } from "std/result.bv";
 // Rebuild on model replacement; release once after its final job, before freeing
 // the borrowed model. Never share a workspace between concurrent evaluations.
 obj PredictionScratch {
-    storage: Int; bytes: Int; population_sum: Float; base: Matrix; profile: Vector;
-    profile_keys: IntVec; profile_values: Vector;
-    active_base: Vector; active_imputed: Vector; similarities: Vector;
-    candidates: Vector; deviations: Vector; used: IntVec;
-    scores: Vector; picked: IntVec;
+    storage: Int; bytes: Int; population_sum: Float; base: FloatMatrix; profile: FloatVector;
+    profile_keys: IntVec; profile_values: FloatVector;
+    active_base: FloatVector; active_imputed: FloatVector; similarities: FloatVector;
+    candidates: FloatVector; deviations: FloatVector; used: IntVec;
+    scores: FloatVector; picked: IntVec;
 };
 
 defn prediction_scratch_new(model: ServerModel, byte_limit: Int) -> Result<PredictionScratch,String> {
+    when !(model.population.nnz >= 0) { trap; };
     let users: Int = model.population.nusers;
     let items: Int = model.population.nitems;
     when users < 1 || users > 65535 || items < 1 || items > 65535 || byte_limit < 1 || byte_limit > 536870912 {
@@ -37,19 +38,19 @@ defn prediction_scratch_new(model: ServerModel, byte_limit: Int) -> Result<Predi
     let storage: Int = Malloc#(bytes) as Int;
     when storage == 0 { term Err("Cannot allocate the bounded prediction workspace; release memory and retry."); };
     let offset: Int = storage+users*users*width;
-    let profile: Vector = Vector { ptr: offset, len: items }; offset = offset+items*width;
-    let profile_values: Vector = Vector { ptr: offset, len: items }; offset = offset+items*width;
-    let active_base: Vector = Vector { ptr: offset, len: users }; offset = offset+users*width;
-    let imputed: Vector = Vector { ptr: offset, len: items }; offset = offset+items*width;
-    let similarities: Vector = Vector { ptr: offset, len: users }; offset = offset+users*width;
-    let candidates: Vector = Vector { ptr: offset, len: capacity }; offset = offset+capacity*width;
-    let deviations: Vector = Vector { ptr: offset, len: capacity }; offset = offset+capacity*width;
-    let scores: Vector = Vector { ptr: offset, len: items }; offset = offset+items*width;
+    let profile: FloatVector = FloatVector { ptr: offset, len: items }; offset = offset+items*width;
+    let profile_values: FloatVector = FloatVector { ptr: offset, len: items }; offset = offset+items*width;
+    let active_base: FloatVector = FloatVector { ptr: offset, len: users }; offset = offset+users*width;
+    let imputed: FloatVector = FloatVector { ptr: offset, len: items }; offset = offset+items*width;
+    let similarities: FloatVector = FloatVector { ptr: offset, len: users }; offset = offset+users*width;
+    let candidates: FloatVector = FloatVector { ptr: offset, len: capacity }; offset = offset+capacity*width;
+    let deviations: FloatVector = FloatVector { ptr: offset, len: capacity }; offset = offset+capacity*width;
+    let scores: FloatVector = FloatVector { ptr: offset, len: items }; offset = offset+items*width;
     offset = storage+((offset-storage+7)/8)*8;
     let keys: IntVec = IntVec { ptr: offset, len: items }; offset = offset+items*8;
     let used: IntVec = IntVec { ptr: offset, len: capacity }; offset = offset+capacity*8;
     let picked: IntVec = IntVec { ptr: offset, len: items };
-    let base: Matrix = Matrix { ptr: storage, rows: users, cols: users };
+    let base: FloatMatrix = FloatMatrix { ptr: storage, rows: users, cols: users };
     prediction_base_fill(model,base);
     term Ok(PredictionScratch { storage: storage, bytes: bytes,
         population_sum: means_sum_all(model.population.user_val,model.population.nnz,0,0.0), base: base, profile: profile,
@@ -58,9 +59,19 @@ defn prediction_scratch_new(model: ServerModel, byte_limit: Int) -> Result<Predi
         candidates: candidates, deviations: deviations, used: used, scores: scores, picked: picked });
 };
 
-defn prediction_base_fill(model: ServerModel, base: Matrix) -> Bool {
+defn prediction_base_fill(model: ServerModel, base: FloatMatrix) -> Bool {
     foreach row in 0..model.population.nusers {
         foreach neighbor in 0..(row+1) {
+            when !(neighbor >= 0) { trap; };
+            when !(neighbor < base.rows) { trap; };
+            when !((row >= 0)) { trap; };
+            when !((row < base.cols)) { trap; };
+            when !((row < base.rows)) { trap; };
+            when !((neighbor >= 0)) { trap; };
+            when !((neighbor < base.cols)) { trap; };
+            when !((row < model.population.nusers)) { trap; };
+            when !((neighbor < model.population.nusers)) { trap; };
+
             let score: Float = base_sim_user(model.population,model.means,row,neighbor);
             mat_set(base,row,neighbor,score); mat_set(base,neighbor,row,score);
         };

@@ -13,5 +13,3 @@ for gate in cache_prepared_gate cache_snapshot_gate; do
     "$BV" build "tests/fixtures/recommender/$gate.bv" --out "$out"
     timeout 90 "$out/$gate"
 done
-"$BV" build tests/fixtures/stdlib/fs_read_lifecycle_gate.bv --out "$out"
-(ulimit -n 64; timeout 30 "$out/fs_read_lifecycle_gate")

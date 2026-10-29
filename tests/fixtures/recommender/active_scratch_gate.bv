@@ -4,7 +4,7 @@
 import { knn_aggregate, knn_aggregate_reuse } from "../../../examples/recommender/cf_engine.bv";
 import "std/matrix.bv";
 
-defn check_case(candidates: IntVec, scores: Vector, deviations: Vector, used: IntVec, n: Int) -> Bool {
+defn check_case(candidates: IntVec, scores: FloatVector, deviations: FloatVector, used: IntVec, n: Int) -> Bool {
     let (fresh_num,fresh_eta): (Float,Float) = knn_aggregate(candidates,scores,deviations,n,30);
     let (reuse_num,reuse_eta): (Float,Float) = knn_aggregate_reuse(scores,deviations,used,n,30);
     term Abs#(fresh_num-reuse_num) <= 0.000001 && Abs#(fresh_eta-reuse_eta) <= 0.000001;
@@ -13,8 +13,8 @@ defn check_case(candidates: IntVec, scores: Vector, deviations: Vector, used: In
 let tick: Int = 0;
 node run [tick < 1][tick == 1] {
     let candidates: IntVec = ivec_new(40);
-    let scores: Vector = vec_new(40);
-    let deviations: Vector = vec_new(40);
+    let scores: FloatVector = vec_new(40);
+    let deviations: FloatVector = vec_new(40);
     let used: IntVec = ivec_new(40);
     foreach idx in 0..40 {
         ivec_set(candidates,idx,idx);

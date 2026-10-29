@@ -11,6 +11,7 @@ defn live_key_valid(key: String) -> Bool {
 };
 
 defn live_connection_token(header: String, offset: Int) -> Bool {
+    when !(offset >= 0) { trap; };
     when offset >= header .^Length { term false; };
     let end: Int = str_find_from(header,",",offset);
     when end < 0 { end = header .^Length; };
@@ -20,6 +21,8 @@ defn live_connection_token(header: String, offset: Int) -> Bool {
 };
 
 defn live_upgrade(state: ServerState, slot: Int, request: HttpRequest) -> ServerState {
+    when !(slot >= 0) { trap; };
+    when !(slot < state.reactor.capacity) { trap; };
     let key: String = io_header(request,"Sec-WebSocket-Key");
     let valid: Bool = request.method == "GET" && str_eq_ci(io_header(request,"Upgrade"),"websocket") &&
         io_header(request,"Sec-WebSocket-Version") == "13" &&
@@ -78,6 +81,8 @@ defn live_control(state: ServerState, slot: Int, frame: WsFrame, message: WsMess
 };
 
 defn live_fragment(state: ServerState, slot: Int, frame: WsFrame, message: WsMessage) -> ServerState {
+    when !(slot >= 0) { trap; };
+    when !(slot < state.reactor.capacity) { trap; };
     let row: Int = reactor_row(state.reactor,slot);
     let pending: Int = Load#(row+104,8);
     when (frame.opcode == 0 && pending == 0) || (frame.opcode == 1 && pending != 0) {
@@ -85,6 +90,7 @@ defn live_fragment(state: ServerState, slot: Int, frame: WsFrame, message: WsMes
     };
     when frame.opcode == 1 && frame.fin { term live_text(state,slot,message.payload); };
     let length: Int = Load#(row+96,8);
+    when !(((length + message.payload.^Length) >= 0)) { trap; };
     when message.payload .^Length > SERVER_INPUT_LIMIT - length { io_ws_close(state.reactor,slot,1009); term state; };
     let memory: Int = Load#(row+88,8);
     when memory == 0 {
@@ -107,6 +113,8 @@ defn live_frame(state: ServerState, slot: Int, frame: WsFrame, message: WsMessag
 };
 
 defn live_frames(state: ServerState, slot: Int, budget: Int) -> ServerState {
+    when !(slot >= 0) { trap; };
+    when !(slot < state.reactor.capacity) { trap; };
     let row: Int = reactor_row(state.reactor,slot);
     when budget <= 0 || Load#(row,8) < 0 || Load#(row+112,8) != 0 { term state; };
     let input: ByteBuf = io_buffer(state.reactor,slot);

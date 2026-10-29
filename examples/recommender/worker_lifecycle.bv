@@ -4,6 +4,8 @@
 import "./worker_messages.bv";
 import "std/posix/syscall.bv";
 
+const SYS_KILL: Int = 62;
+const SYS_PRCTL: Int = 157;
 const WORKER_MODEL_SLOTS: Int = 4;
 const WORKER_WAIT_NOHANG: Int = 1;
 const WORKER_SIGTERM: Int = 15;

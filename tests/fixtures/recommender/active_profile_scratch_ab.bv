@@ -3,7 +3,7 @@
 //===----------------------------------------------------------------------===//
 import "./active_profile_support.bv";
 
-defn active_gate_allocating_scan(active: ActivePrediction, scores: Vector) -> Bool {
+defn active_gate_allocating_scan(active: ActivePrediction, scores: FloatVector) -> Bool {
     foreach item in 0..scores.len {
         vec_set(scores,item,clamp15(0.5*active_user_prediction(active,item)+0.5*active_item_prediction(active,item)));
     };
@@ -16,7 +16,7 @@ defn active_gate_scratch_ab(engine: ActiveProfileEngine) -> Bool {
     active_profile_build(profile);
     let compatible: ActivePrediction = ActivePrediction { state: active_gate_state(2147483000,ratings),
         model: engine.model, similarities: engine.scratch.similarities, mean: profile.mean, excluded: profile.excluded };
-    let reference: Vector = vec_new(engine.model.population.nitems);
+    let reference: FloatVector = vec_new(engine.model.population.nitems);
     let allocating_us: Int = 0; let reusable_us: Int = 0;
     foreach repeat in 0..10 {
         let started: Int = trace_clock();

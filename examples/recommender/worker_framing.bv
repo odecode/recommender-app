@@ -19,6 +19,8 @@ obj WorkerFrame { text: String; consumed: Int; };
 defn worker_frame_size(buffer: ByteBuf) -> Int {
     when buffer.len < 0 || buffer.cap < buffer.len || (buffer.len > 0 && buffer.ptr == 0) { term -1; };
     when buffer.len < WORKER_FRAME_HEADER { term 0; };
+    when !((4 + 4) <= buffer.len) { trap; };
+    when !((0 + 4) <= buffer.len) { trap; };
     when get_u32_be(buffer,0) != WORKER_FRAME_MAGIC { term -1; };
     let bytes: Int = get_u32_be(buffer,4);
     when bytes < 1 || bytes > PROTOCOL_JSON_LIMIT { term -1; };
@@ -26,7 +28,9 @@ defn worker_frame_size(buffer: ByteBuf) -> Int {
 };
 defn worker_frame_encode(text: String) -> Result<GrowBuf,String> {
     let bytes: Int = text .^Length;
+    when !((WORKER_FRAME_HEADER + bytes) >= 1) { trap; };
     when bytes < 1 || bytes > PROTOCOL_JSON_LIMIT { term Err("Worker payload must contain 1..65536 UTF-8 bytes."); };
+
     let buffer: GrowBuf = grow_new(WORKER_FRAME_HEADER+bytes);
     when buffer.ptr == 0 { term Err("Cannot allocate the bounded worker frame; release resources and retry."); };
     let header: GrowBuf = buffer.put_u32_be(WORKER_FRAME_MAGIC).put_u32_be(bytes);
@@ -36,5 +40,8 @@ defn worker_frame_decode(buffer: ByteBuf) -> Result<WorkerFrame,String> {
     let size: Int = worker_frame_size(buffer);
     when size < 0 { term Err("Invalid worker frame magic, length or buffer bounds."); };
     when size == 0 || buffer.len < size { term Err("Worker frame is incomplete; retain the bytes and continue reading."); };
-    term Ok(WorkerFrame { text: buf_slice_string(buffer,WORKER_FRAME_HEADER,size-WORKER_FRAME_HEADER), consumed: size });
+    when !(((size - WORKER_FRAME_HEADER) >= 0)) { trap; };
+    when !(((WORKER_FRAME_HEADER + (size - WORKER_FRAME_HEADER)) <= buffer.len)) { trap; };
+    term Ok(WorkerFrame {
+ text: buf_slice_string(buffer,WORKER_FRAME_HEADER,size-WORKER_FRAME_HEADER), consumed: size });
 };

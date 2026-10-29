@@ -44,12 +44,18 @@ defn worker_child(config: RefreshConfig, reactor: Reactor, inherited: PgConn) ->
 
 defn worker_start(conn: PgConn, reactor: Reactor, baseline: Int, items: Int) -> RefreshWorker {
     let identity: PgResult = pg_simple_query(conn,"SELECT current_user,current_database(),current_schema()");
+    when !(((0 >= 0) && (0 < identity.nrows))) { trap; };
+    when !((2 < identity.ncols)) { trap; };
+    when !((0 < identity.nrows)) { trap; };
+    when !((1 < identity.ncols)) { trap; };
+    when !((0 < identity.ncols)) { trap; };
     when !identity.ok || identity.nrows != 1 { term worker_idle(); };
     let parent: Int = syscall(39);
     let reserved: Result<String,Int> = mktemp_file(model_cache_path()+".worker."+parent as String);
     when is_err(reserved) { term worker_idle(); };
     let path: String = unwrap(reserved);
-    let config: RefreshConfig = RefreshConfig { user: pg_row_text(identity,0,0), database: pg_row_text(identity,0,1),
+    let config: RefreshConfig = RefreshConfig {
+ user: pg_row_text(identity,0,0), database: pg_row_text(identity,0,1),
         schema: pg_row_text(identity,0,2), path: path, baseline: baseline, items: items, parent: parent };
     let pid: Int = syscall(57);
     when pid == 0 { worker_child(config,reactor,conn); term worker_idle(); };

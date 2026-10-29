@@ -20,6 +20,8 @@ import "./account_state.bv";
 import { buf_slice_string } from "std/net/http.bv";
 import "std/string_c.bv";
 
+const SYS_SOCKETPAIR: Int = 53;
+const SYS_KILL: Int = 62;
 const WORKER_SOCKET_STREAM: Int = 1;
 const WORKER_SIGCHLD: Int = 17;
 const WORKER_FRAME_MAGIC_VALUE: Int = 1112692273;
@@ -172,15 +174,28 @@ defn worker_model_empty() -> Result<WorkerModelState,String> {
     let population: RatingPopulation = RatingPopulation { user_off: ivec_new(2), user_item: ivec_new(1),
         user_val: vec_new(1), item_off: ivec_new(2), item_user: ivec_new(1), item_val: vec_new(1),
         nusers: 1, nitems: 1, nnz: 0 };
+when !((0 < population.item_off.len)) { trap; };
+when !((1 < population.item_off.len)) { trap; };
+
+    when !((1 < population.user_off.len)) { trap; };
+    when !((0 < population.user_off.len)) { trap; };
     ivec_set(population.user_off,0,0); ivec_set(population.user_off,1,0);
     ivec_set(population.item_off,0,0); ivec_set(population.item_off,1,0);
     let means: Means = Means { user_mean: vec_new(1), item_mean: vec_new(1),
         user_has: ivec_new(1), item_has: ivec_new(1), global: 0.0 };
+    when !(0 < means.user_mean.len) { trap; };
+    when !(0 < means.item_mean.len) { trap; };
+    when !(0 < means.user_has.len) { trap; };
+    when !(0 < means.item_has.len) { trap; };
     vec_set(means.user_mean,0,0.0); vec_set(means.item_mean,0,0.0);
     ivec_set(means.user_has,0,0); ivec_set(means.item_has,0,0);
     let cache: SimCache = SimCache { user_sim: mat_new(1,1), item_sim: mat_new(1,1),
         user_mean: means.user_mean, item_mean: means.item_mean, nusers: 1, nitems: 1,
         sig: PopSignature { nnz: 0, mtime: 0 } };
+    when !(0 < cache.user_sim.rows) { trap; };
+    when !(0 < cache.user_sim.cols) { trap; };
+    when !(0 < cache.item_sim.rows) { trap; };
+    when !(0 < cache.item_sim.cols) { trap; };
     mat_set(cache.user_sim,0,0,0.0); mat_set(cache.item_sim,0,0,0.0);
     let accounts: List<Int> = [];
     let model: ServerModel = ServerModel { population: population, means: means, cache: cache,
@@ -219,6 +234,7 @@ defn worker_child_loop(fd: Int, frame: Int, role: String, state: WorkerModelStat
     when header != 8 { term 2; };
     let magic: Int = (Load#(frame,1)<<24)|(Load#(frame+1,1)<<16)|(Load#(frame+2,1)<<8)|Load#(frame+3,1);
     let size: Int = (Load#(frame+4,1)<<24)|(Load#(frame+5,1)<<16)|(Load#(frame+6,1)<<8)|Load#(frame+7,1);
+    when !((size >= 0)) { trap; };
     when magic != WORKER_FRAME_MAGIC_VALUE || size < 1 || size > PROTOCOL_JSON_LIMIT { term 3; };
     when worker_child_read_full(fd,frame+8,size,0) != size { term 4; };
     let text: String = buf_slice_string(ByteBuf { ptr: frame, len: size+8, cap: WORKER_MAX_FRAME },8,size);

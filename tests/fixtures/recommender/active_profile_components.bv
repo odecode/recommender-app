@@ -12,7 +12,7 @@ defn active_gate_components(model: ServerModel, rating_count: Int) -> Bool {
     let capacity: Int = pop.nnz+rating_count+1;
     let users: IntVec = ivec_new(capacity);
     let items: IntVec = ivec_new(capacity);
-    let values: Vector = vec_new(capacity);
+    let values: FloatVector = vec_new(capacity);
     let count: Int = 0;
     foreach user in 0..pop.nusers { count = active_copy_row(pop,user,users,items,values,count); };
     foreach idx in 0..rating_count {

@@ -104,22 +104,35 @@ short-circuit lowering. Preserve mutable parameter/local slots and only reuse
 cached values where they dominate the use. Add behavioral regressions for
 short-circuit expressions and mutable slots.
 
-### Catalogue scan exhausted the browser WASM stack
+### Catalogue scan trapped on a dangling state-list header
 
 **Area:** LLVM-generated browser WebAssembly code; recommender catalogue scan.
 
-**Cause:** The generated scan consumed unbounded recursive call-stack depth for
-the catalogue size used by the browser app. This was a bounded-stack
-correctness failure, not a performance issue.
+**Cause:** A collection state field initialized with `[]` built its
+`[data, cap, len]` header with `alloca` inside `init_state`, then stored that
+stack address in `%State`. `init_state` returned before the catalogue response,
+so the first scan dereferenced a dead frame and trapped. The scan also had
+unbounded wasm recursion at 1682 entries, but that was a separate stack-depth
+limit; the immediate trap was the dangling header.
 
-**Reproduction:** Compile the browser app to WASM, load the catalogue, and
-submit a rating. The original module traps in `browser_catalogue_scan` before
-the app can complete the interaction.
+**Reproduction:** Compile the browser app to WASM and load the catalogue. The
+module traps in `browser_catalogue_scan` while reading the first movie handle,
+before the app can complete the interaction.
 
-**Fix:** Apply LLVM's `mem2reg` and `tailcallelim` passes to the generated app
-IR before the existing WASM lowering/link steps. The transformed module
-completes catalogue load, rating submission, and saved/recommendation events.
-This was verified as a correctness gate; no throughput claim is made.
+**Fix:** Compiler commit `6604ae53` heap-owns state-collection construction
+headers, isolates callable-txn emission from a preceding tail-lowered defn, and
+lowers eligible wasm self-tail recursion to an explicit loop. Compiler commit
+`210c5b9b` seeds top-level unpacked instances on assignment, fixing the real
+server's lost registration response. `b1de89fc` clears txn identity at defn
+entry and stops keyed-row churn, fixing the real browser responsiveness gate.
+`569cf69b` retains every enum return image, fixing the server protocol and
+runtime ownership crashes. Otto Westerlund’s PR #48 (`2288e4ec`, merged at
+`97bc4fa0`) fixes pooled-object replacement and mixed-width member storage.
+`3f633135` reserves the full row width in view snapshots; `e110fd1e` snapshots
+flush records before effects can grow and detach wasm memory. `mem2reg` and
+`tailcallelim` remain in the wasm pipeline, but they did not fix the immediate
+lifetime fault. Verified with `browser_pending_peer.mjs` (twice) and the I11
+real browser/server gate; no throughput claim is made.
 
 ### Specialized catalogue iteration called an incompatible erased adapter
 
