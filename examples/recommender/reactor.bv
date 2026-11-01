@@ -35,6 +35,8 @@ defn reactor_clear_words(address: Int, count: Int) [count >= 0][true] -> Bool {
 
 defn reactor_init_slots(reactor: Reactor, slot: Int) -> Bool {
     when slot >= reactor.capacity { term true; };
+    when !(slot >= 0) { trap; };
+    when !(slot < reactor.capacity) { trap; };
     let row: Int = reactor_row(reactor, slot);
     reactor_clear_words(row, 16);
     Store#(row, -1, 8);
@@ -87,6 +89,7 @@ defn reactor_remove(reactor: Reactor, slot: Int)
     let row: Int = reactor_row(reactor, slot);
     let fd: Int = Load#(row, 8);
     when fd == -1 { term true; };
+    when !(fd >= (-4096)) { trap; };
     let closed: Int = sock_close(Socket { fd: fd });
     Free#(Load#(row + 40, 8) as Ptr);
     Free#(Load#(row + 48, 8) as Ptr);
@@ -99,6 +102,8 @@ defn reactor_remove(reactor: Reactor, slot: Int)
 
 defn reactor_close_slots(reactor: Reactor, slot: Int) -> Bool {
     when slot >= reactor.capacity { term true; };
+    when !(slot >= 0) { trap; };
+    when !(slot < reactor.capacity) { trap; };
     reactor_remove(reactor, slot);
     reactor_close_slots(reactor, slot + 1);
     term true;
@@ -107,6 +112,7 @@ defn reactor_close_slots(reactor: Reactor, slot: Int) -> Bool {
 defn reactor_close(reactor: Reactor) -> Bool {
     when reactor.listener < 0 { term true; };
     reactor_close_slots(reactor, 0);
+    when !(reactor.listener >= (-4096)) { trap; };
     let closed: Int = sock_close(Socket { fd: reactor.listener });
     Free#(reactor.polls as Ptr);
     Free#(reactor.connections as Ptr);
@@ -115,6 +121,7 @@ defn reactor_close(reactor: Reactor) -> Bool {
 
 defn reactor_accept_ready(reactor: Reactor, slot: Int) -> Int {
     when slot < 0 { term 0; };
+    when !(reactor.listener >= (-4096)) { trap; };
     let peer: Socket = sock_accept(Socket { fd: reactor.listener });
     when peer.fd == -11 || peer.fd == -4 { term 0; };
     when peer.fd < 0 { term peer.fd; };

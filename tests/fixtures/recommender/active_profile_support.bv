@@ -24,7 +24,7 @@ defn active_gate_state(owner: Int, ratings: List<ProfileRating>) -> AccountState
 defn active_gate_model(users: Int, items: Int, mode: Int) -> ServerModel {
     let row: IntVec = ivec_new(users*items+1);
     let col: IntVec = ivec_new(users*items+1);
-    let values: Vector = vec_new(users*items+1);
+    let values: FloatVector = vec_new(users*items+1);
     let count: Int = 0;
     foreach user in 0..users {
         foreach item in 0..items {
@@ -44,7 +44,7 @@ defn active_gate_model(users: Int, items: Int, mode: Int) -> ServerModel {
         accounts: accounts, baseline_users: users-1, revision: "i06" };
 };
 
-defn active_gate_reference_rank(scores: Vector, ratings: List<ProfileRating>) -> List<Int> {
+defn active_gate_reference_rank(scores: FloatVector, ratings: List<ProfileRating>) -> List<Int> {
     let picked: IntVec = ivec_new(scores.len);
     foreach item in 0..scores.len { ivec_set(picked,item,0); };
     foreach idx in 0..ratings .^Length { ivec_set(picked,ratings[idx].item_id,1); };
@@ -65,7 +65,7 @@ defn active_gate_compare(engine: ActiveProfileEngine, owner: Int, count: Int, ed
     let state: AccountState = active_gate_state(owner,ratings);
     let reference_started: Int = trace_clock();
     let reference: ActivePrediction = active_build(engine.model,state);
-    let reference_scores: Vector = vec_new(engine.model.population.nitems);
+    let reference_scores: FloatVector = vec_new(engine.model.population.nitems);
     foreach item in 0..reference_scores.len {
         vec_set(reference_scores,item,clamp15(0.5*active_user_prediction(reference,item)+0.5*active_item_prediction(reference,item)));
     };

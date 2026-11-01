@@ -36,7 +36,10 @@ defn baseline_load_result(result: PgResult, loaded: Bool, accepted: Int, discard
 // Requires an idle dedicated connection and the schema from store.bv.
 defn baseline_bootstrap(conn: PgConn, path: String) -> BaselineLoad {
     let marker: PgResult = store_baseline_begin(conn);
+    when !((0 < marker.nrows)) { trap; };
+    when !((0 < marker.ncols)) { trap; };
     when marker.ok == false { term baseline_load_result(marker, false, 0, 0); };
+
     when pg_row_text(marker, 0, 0) == "t" {
         let committed: PgResult = pg_simple_query(conn, "COMMIT");
         term baseline_load_result(committed, false, 0, 0);
@@ -122,6 +125,9 @@ defn baseline_line(conn: PgConn, line: String, state: BaselineProgress) -> Basel
 
 defn baseline_flush(conn: PgConn, state: BaselineProgress) -> BaselineProgress {
     when state.result.ok == false || state.pending .^Length == 0 { term state; };
+    when !((state.pending.^Length > 0)) { trap; };
+    when !((state.pending.^Length <= 64)) { trap; };
+
     let sql: String = baseline_insert_sql(state.pending .^Length);
     let empty_params: List<String> = [];
     let params: List<String> = baseline_params(state.pending, 0, empty_params);

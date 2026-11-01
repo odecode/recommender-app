@@ -16,10 +16,10 @@ node run [tick < 1][tick == 1] {
         let row: Int = Malloc#(128) as Int;
         reactor_clear_words(row,16);
         Store#(row,get_env_int("PROPERTY_FD"),8);
-        Store#(row+16,get_env_int("PROPERTY_UPGRADED"),8);
-        Store#(row+24,get_env_int("PROPERTY_BOUND_OWNER"),8);
+        Store#(row+16,get_env_int("PROPERTY_BOUND_OWNER"),8);
+        Store#(row+24,get_env_int("PROPERTY_ROW_OWNER"),8);
         Store#(row+112,get_env_int("PROPERTY_CLOSING"),8);
-        println!("{}",server_channel_owned(row,get_env_int("PROPERTY_OWNER")));
+        println!("{}",server_channel_owned(row,get_env_int("PROPERTY_QUERY_OWNER")));
         Free#(row as Ptr);
     };
     tick = 1; endprogram;

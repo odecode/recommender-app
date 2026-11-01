@@ -79,10 +79,13 @@ defn api_rated(state: AccountState, item: Int) -> Bool {
     term false;
 };
 
-defn api_best_item(scores: Vector, picked: IntVec) -> Int {
+defn api_best_item(scores: FloatVector, picked: IntVec) -> Int {
     let best: Int = -1;
     let score: Float = -1.0;
     foreach item in 0..scores.len {
+        when !((item >= 0)) { trap; };
+        when !((item < picked.len)) { trap; };
+
         when ivec_get(picked,item) == 0 && vec_get(scores,item) > score { best = item; score = vec_get(scores,item); };
     };
     term best;
@@ -95,14 +98,16 @@ defn api_add_recommendation(text: String, item: Int, score: Float) -> String {
 };
 
 defn api_recommendations(model: ServerModel, state: AccountState, lambda: Float) -> String {
+    when !(model.population.nitems >= 1) { trap; };
     when api_cold_start(state.ratings .^Length) { term "{\"cold_start\":true}"; };
     let build_started: Int = trace_clock();
     let active: ActivePrediction = active_build(model,state);
+    when !(active.model.population.nitems >= 1) { trap; };
     trace_stage("active_build",build_started);
     let predict_started: Int = trace_clock();
-    let scores: Vector = vec_new(model.population.nitems);
-    let picked: IntVec = ivec_new(model.population.nitems);
-    foreach item in 0..model.population.nitems {
+    let scores: FloatVector = vec_new(active.model.population.nitems);
+    let picked: IntVec = ivec_new(active.model.population.nitems);
+    foreach item in 0..active.model.population.nitems {
         ivec_set(picked,item,0);
         when api_rated(state,item) { ivec_set(picked,item,1); };
         let score: Float = clamp15(lambda * active_user_prediction(active,item) + (1.0-lambda) * active_item_prediction(active,item));
@@ -113,7 +118,9 @@ defn api_recommendations(model: ServerModel, state: AccountState, lambda: Float)
     let text: String = "";
     foreach rank in 0..TOP_N {
         let best: Int = api_best_item(scores,picked);
+        when !((best < scores.len)) { trap; };
         when best >= 0 {
+            when !(best < picked.len) { trap; };
             text = api_add_recommendation(text,best,vec_get(scores,best));
             ivec_set(picked,best,1);
         };
@@ -157,6 +164,7 @@ defn api_movies(catalogue: MovieCatalogue) -> String {
     // per catalogue request. Own one growing buffer and release it after the
     // final String copy; keep this until String builders own temporary storage.
     let text: GrowBuf = put_str(grow_new(256),"{\"movies\":[");
+    when !((text.len >= 0)) { trap; };
     foreach idx in 0..catalogue.movies .^Length {
         let movie: CatalogueMovie = catalogue.movies[idx];
         when movie.item_id != idx || movie.title .^Length == 0 { grow_free(text); term ""; };
@@ -165,6 +173,7 @@ defn api_movies(catalogue: MovieCatalogue) -> String {
             ",\"title\":" + api_quote(movie.title) + "}");
     };
     text = put_str(text,"]}");
+    when !((text.len >= 0)) { trap; };
     let result: String = buf_slice_string(ByteBuf { ptr: text.ptr, len: text.len, cap: text.cap },0,text.len);
     grow_free(text);
     term result;

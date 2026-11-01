@@ -42,7 +42,9 @@ defn active_profile_owner_row(model: ServerModel, owner: Int) -> Int {
 defn active_profile_prepare(engine: ActiveProfileEngine, owner: Int, ratings: List<ProfileRating>) -> Result<ActiveProfileEngine,String> {
     let pop: RatingPopulation = engine.model.population;
     when owner < 1 || ratings .^Length > pop.nitems { term Err("Supply a valid owner and at most one rating per catalogue item."); };
-    foreach item in 0..pop.nitems { vec_set(engine.scratch.profile,item,-1.0); };
+    foreach item in 0..pop.nitems {
+        when !(item < engine.scratch.profile.len) { trap; };
+        vec_set(engine.scratch.profile,item,-1.0); };
     let previous: Int = -1;
     let sum: Float = 0.0;
     foreach idx in 0..ratings .^Length {
@@ -50,7 +52,12 @@ defn active_profile_prepare(engine: ActiveProfileEngine, owner: Int, ratings: Li
         when rating.item_id <= previous || rating.item_id >= pop.nitems || rating.rating < 1 || rating.rating > 5 {
             term Err("Supply unique catalogue item IDs in ascending order with ratings from 1 to 5.");
         };
+        when !(rating.item_id >= 0) { trap; };
+        when !(rating.item_id < engine.scratch.profile.len) { trap; };
         vec_set(engine.scratch.profile,rating.item_id,rating.rating as Float);
+        when !(idx >= 0) { trap; };
+        when !(idx < engine.scratch.profile_keys.len) { trap; };
+        when !(idx < engine.scratch.profile_values.len) { trap; };
         ivec_set(engine.scratch.profile_keys,idx,rating.item_id);
         vec_set(engine.scratch.profile_values,idx,rating.rating as Float);
         sum = sum+(rating.rating as Float); previous = rating.item_id;
@@ -68,7 +75,10 @@ defn active_profile_global(engine: ActiveProfileEngine, excluded: Int, added_sum
     let sum: Float = engine.scratch.population_sum+added_sum;
     let count: Int = pop.nnz+added_count;
     when excluded >= 0 {
+        when !(excluded < pop.nusers) { trap; };
         foreach idx in pop_user_begin(pop,excluded)..pop_user_end(pop,excluded) {
+            when !((idx >= 0)) { trap; };
+            when !((idx < pop.user_val.len)) { trap; };
             sum = sum-vec_get(pop.user_val,idx); count = count-1;
         };
     };
@@ -77,7 +87,11 @@ defn active_profile_global(engine: ActiveProfileEngine, excluded: Int, added_sum
 };
 
 defn active_profile_user_mean(profile: ActiveProfileEngine, user: Int) -> Float {
+    when !((user >= 0)) { trap; };
+    when !((user < profile.model.means.user_mean.len)) { trap; };
     let pop: RatingPopulation = profile.model.population;
+
+    when !((user < pop.nusers)) { trap; };
     when user == profile.excluded || pop_user_begin(pop,user) == pop_user_end(pop,user) { term profile.global; };
     term vec_get(profile.model.means.user_mean,user);
 };
@@ -85,6 +99,9 @@ defn active_profile_user_mean(profile: ActiveProfileEngine, user: Int) -> Float 
 defn active_profile_base(profile: ActiveProfileEngine, user: Int) -> Float {
     when user == profile.excluded { term 0.0; };
     let pop: RatingPopulation = profile.model.population;
+    when !((user >= 0)) { trap; };
+    when !((user < pop.nusers)) { trap; };
+    when !((pop_user_begin(pop, user) >= 0)) { trap; };
     let other_mean: Float = active_profile_user_mean(profile,user);
     let (numerator,own_norm,other_norm): (Float,Float,Float) = overlap_acc(
         profile.scratch.profile_keys,profile.scratch.profile_values,pop.user_item,pop.user_val,
@@ -94,9 +111,13 @@ defn active_profile_base(profile: ActiveProfileEngine, user: Int) -> Float {
 
 defn active_profile_impute_self(profile: ActiveProfileEngine, item: Int) -> Float {
     let scratch: PredictionScratch = profile.scratch;
+
+    when !((item >= 0)) { trap; };
+    when !((item < scratch.profile.len)) { trap; };
     let observed: Float = vec_get(scratch.profile,item);
     when observed >= 0.0 { term observed; };
     let pop: RatingPopulation = profile.model.population;
+    when !((item < pop.nitems)) { trap; };
     let (numerator,weight): (Float,Float) = active_profile_impute_acc(profile,-1,
         pop_item_begin(pop,item),pop_item_end(pop,item),0.0,0.0);
     when weight <= 0.0 { term profile.mean; };
@@ -106,9 +127,15 @@ defn active_profile_impute_self(profile: ActiveProfileEngine, item: Int) -> Floa
 // Called only for a missing peer entry at an observed active-profile item.
 defn active_profile_impute_peer(profile: ActiveProfileEngine, user: Int, item: Int) -> Float {
     let pop: RatingPopulation = profile.model.population;
+    when !((item >= 0)) { trap; };
+    when !((item < pop.nitems)) { trap; };
     let scratch: PredictionScratch = profile.scratch;
+    when !((item < scratch.profile.len)) { trap; };
+    when !((user >= 0)) { trap; };
+    when !((user < scratch.active_base.len)) { trap; };
     let (numerator,weight): (Float,Float) = active_profile_impute_acc(profile,user,
         pop_item_begin(pop,item),pop_item_end(pop,item),0.0,0.0);
+
     let sim: Float = vec_get(scratch.active_base,user);
     numerator = numerator+sim*(vec_get(scratch.profile,item)-profile.mean);
     weight = weight+Fabs#(sim);
@@ -120,11 +147,22 @@ defn active_profile_impute_peer(profile: ActiveProfileEngine, user: Int, item: I
 defn active_profile_impute_acc(profile: ActiveProfileEngine, user: Int, cursor: Int, end: Int, numerator: Float, weight: Float) -> (Float,Float) {
     when cursor >= end { term (numerator,weight); };
     let pop: RatingPopulation = profile.model.population;
+
+    when !((cursor >= 0)) { trap; };
+    when !((cursor < pop.item_user.len)) { trap; };
     let neighbor: Int = ivec_get(pop.item_user,cursor);
+    when !(user < profile.scratch.base.rows) { trap; };
+    when !((neighbor >= 0)) { trap; };
+    when !((neighbor < profile.scratch.base.cols)) { trap; };
+    when !((neighbor < profile.scratch.active_base.len)) { trap; };
     when neighbor == profile.excluded || neighbor == user {
         term active_profile_impute_acc(profile,user,cursor+1,end,numerator,weight);
     };
+    when !(cursor >= 0) { trap; };
+    when !(cursor < pop.item_val.len) { trap; };
     let sim: Float = vec_get(profile.scratch.active_base,neighbor);
+    when !(user < profile.scratch.base.rows) { trap; };
+    when !(neighbor < profile.scratch.base.cols) { trap; };
     when user >= 0 { sim = mat_get(profile.scratch.base,user,neighbor); };
     term active_profile_impute_acc(profile,user,cursor+1,end,
         numerator+sim*(vec_get(pop.item_val,cursor)-active_profile_user_mean(profile,neighbor)),weight+Fabs#(sim));
@@ -133,17 +171,29 @@ defn active_profile_impute_acc(profile: ActiveProfileEngine, user: Int, cursor: 
 defn active_profile_similarity(profile: ActiveProfileEngine, user: Int) -> Float {
     when user == profile.excluded { term 0.0; };
     let pop: RatingPopulation = profile.model.population;
-    profile.peer_user = user; profile.peer_end = pop_user_end(pop,user);
+    when !((user >= 0)) { trap; };
+    when !((user < pop.nusers)) { trap; };
+    profile.peer_user = user;
+ profile.peer_end = pop_user_end(pop,user);
     profile.peer_mean = active_profile_user_mean(profile,user);
     term active_profile_union(profile,0,pop_user_begin(pop,user),0.0,0.0,0.0);
 };
 
 defn active_profile_union(profile: ActiveProfileEngine, own_cursor: Int, peer_cursor: Int, numerator: Float, own_norm: Float, other_norm: Float) -> Float {
+    when !(own_cursor >= 0) { trap; };
+    when !(peer_cursor >= 0) { trap; };
     let count: Int = profile.ratings .^Length;
     when own_cursor >= count && peer_cursor >= profile.peer_end { term pcc_finish(numerator,own_norm,other_norm); };
     let pop: RatingPopulation = profile.model.population;
+    when !((profile.peer_user >= 0)) { trap; };
+    when !((profile.peer_user < pop.nusers)) { trap; };
+    when !((pop_user_begin(pop, profile.peer_user) >= 0)) { trap; };
+    when !((profile.peer_end >= pop_user_begin(pop, profile.peer_user))) { trap; };
     let keys: IntVec = profile.scratch.profile_keys;
     let item: Int = sim_next_item(keys,own_cursor,count,pop.user_item,peer_cursor,profile.peer_end);
+when !((item >= 0)) { trap; };
+when !((item < profile.scratch.active_imputed.len)) { trap; };
+
     let observed: Float = lookup_row(pop.user_item,pop.user_val,item,pop_user_begin(pop,profile.peer_user),profile.peer_end);
     let own: Float = vec_get(profile.scratch.active_imputed,item)-profile.mean;
     let other: Float = active_profile_peer_value(profile,profile.peer_user,item,observed)-profile.peer_mean;
@@ -158,38 +208,78 @@ defn active_profile_peer_value(profile: ActiveProfileEngine, user: Int, item: In
 
 defn active_profile_build(profile: ActiveProfileEngine) -> Bool {
     let scratch: PredictionScratch = profile.scratch;
-    foreach user in 0..profile.model.population.nusers { vec_set(scratch.active_base,user,active_profile_base(profile,user)); };
-    foreach item in 0..profile.model.population.nitems { vec_set(scratch.active_imputed,item,active_profile_impute_self(profile,item)); };
-    foreach user in 0..profile.model.population.nusers { vec_set(scratch.similarities,user,active_profile_similarity(profile,user)); };
+    foreach user in 0..profile.model.population.nusers {
+        when !(user < scratch.active_base.len) { trap; };
+        vec_set(scratch.active_base,user,active_profile_base(profile,user)); };
+    foreach item in 0..profile.model.population.nitems {
+        when !(item < scratch.active_imputed.len) { trap; };
+        vec_set(scratch.active_imputed,item,active_profile_impute_self(profile,item)); };
+    foreach user in 0..profile.model.population.nusers {
+        when !(user < scratch.similarities.len) { trap; };
+        vec_set(scratch.similarities,user,active_profile_similarity(profile,user)); };
     term true;
 };
 
-defn active_profile_user_prediction(profile: ActiveProfileEngine, item: Int) -> Float {
+defn active_profile_user_prediction(profile: ActiveProfileEngine, item: Int)
+    [item >= 0 && item < profile.model.population.nitems]
+    -> Float {
     let pop: RatingPopulation = profile.model.population;
     let scratch: PredictionScratch = profile.scratch;
     let count: Int = 0;
+when !((count >= 0)) { trap; };
+when !((count < scratch.candidates.len)) { trap; };
+
     foreach idx in pop_item_begin(pop,item)..pop_item_end(pop,item) {
+        when !((idx >= 0)) { trap; };
+        when !((idx < pop.item_user.len)) { trap; };
         let user: Int = ivec_get(pop.item_user,idx);
+        when !(idx < pop.item_val.len) { trap; };
         when user != profile.excluded {
+            when !(user >= 0) { trap; };
+            when !(user < scratch.similarities.len) { trap; };
+            when !(count >= 0) { trap; };
+            when !(count < scratch.candidates.len) { trap; };
+            when !(count < scratch.deviations.len) { trap; };
             vec_set(scratch.candidates,count,vec_get(scratch.similarities,user));
+            when !(user < profile.model.cache.user_mean.len) { trap; };
             vec_set(scratch.deviations,count,vec_get(pop.item_val,idx)-vec_get(profile.model.cache.user_mean,user));
             count = count+1;
         };
     };
+    when !(count >= 0) { trap; };
+    when !(count <= scratch.candidates.len) { trap; };
+    when !(count <= scratch.deviations.len) { trap; };
+    when !(count <= scratch.used.len) { trap; };
     let (numerator,weight): (Float,Float) = knn_aggregate_reuse(scratch.candidates,scratch.deviations,scratch.used,count,NEIGHBOR_K);
     when weight == 0.0 { term profile.mean; };
     term profile.mean+numerator/weight;
 };
 
-defn active_profile_item_prediction(profile: ActiveProfileEngine, item: Int) -> Float {
+defn active_profile_item_prediction(profile: ActiveProfileEngine, item: Int)
+    [item >= 0 && item < profile.model.population.nitems]
+    -> Float {
+    when !(item < profile.model.cache.nitems) { trap; };
     // Preserve the serial server's frozen item similarities and item means;
     // active profile evaluation updates its user-side view only.
     let scratch: PredictionScratch = profile.scratch;
     foreach idx in 0..profile.ratings .^Length {
+        when !((idx < scratch.deviations.len)) { trap; };
+        when !((idx >= 0)) { trap; };
+        when !((idx < scratch.candidates.len)) { trap; };
         let rating: ProfileRating = profile.ratings[idx];
+
+        when !((item >= 0)) { trap; };
+        when !((item < profile.model.cache.nitems)) { trap; };
+        when !((rating.item_id >= 0)) { trap; };
+        when !((rating.item_id < profile.model.cache.nitems)) { trap; };
         vec_set(scratch.candidates,idx,simcache_item_sim(profile.model.cache,item,rating.item_id));
         vec_set(scratch.deviations,idx,(rating.rating as Float)-simcache_item_mean(profile.model.cache,rating.item_id));
     };
+    when !(profile.ratings .^Length >= 0) { trap; };
+    when !(0 <= profile.ratings .^Length) { trap; };
+    when !(profile.ratings .^Length <= scratch.candidates.len) { trap; };
+    when !(profile.ratings .^Length <= scratch.deviations.len) { trap; };
+    when !(profile.ratings .^Length <= scratch.used.len) { trap; };
     let (numerator,weight): (Float,Float) = knn_aggregate_reuse(scratch.candidates,scratch.deviations,scratch.used,profile.ratings .^Length,NEIGHBOR_K);
     let mean: Float = simcache_item_mean(profile.model.cache,item);
     when weight == 0.0 { term mean; };
@@ -199,8 +289,13 @@ defn active_profile_item_prediction(profile: ActiveProfileEngine, item: Int) -> 
 defn active_profile_scores(profile: ActiveProfileEngine, lambda: Float) -> Bool {
     let scratch: PredictionScratch = profile.scratch;
     foreach item in 0..profile.model.population.nitems {
+        when !((item < scratch.profile.len)) { trap; };
+        when !((item >= 0)) { trap; };
+        when !((item < scratch.picked.len)) { trap; };
+        when !((item < scratch.scores.len)) { trap; };
         let score: Float = clamp15(lambda*active_profile_user_prediction(profile,item)+(1.0-lambda)*active_profile_item_prediction(profile,item));
         when !json_finite(score) { term false; };
+
         vec_set(scratch.scores,item,score);
         ivec_set(scratch.picked,item,0);
         when vec_get(scratch.profile,item) >= 0.0 { ivec_set(scratch.picked,item,1); };
@@ -212,8 +307,11 @@ defn active_profile_rank(scratch: PredictionScratch) -> List<RankedMovie> {
     let items: List<RankedMovie> = [];
     foreach rank in 0..TOP_N {
         let best: Int = active_profile_best(scratch);
+        when !((best < scratch.picked.len)) { trap; };
+        when !((best < scratch.scores.len)) { trap; };
         when best >= 0 {
-            items <- RankedMovie { item_id: best, score: vec_get(scratch.scores,best) };
+            items <- RankedMovie {
+ item_id: best, score: vec_get(scratch.scores,best) };
             ivec_set(scratch.picked,best,1);
         };
     };
@@ -223,6 +321,9 @@ defn active_profile_rank(scratch: PredictionScratch) -> List<RankedMovie> {
 defn active_profile_best(scratch: PredictionScratch) -> Int {
     let best: Int = -1; let score: Float = -1.0;
     foreach item in 0..scratch.scores.len {
+        when !((item >= 0)) { trap; };
+        when !((item < scratch.picked.len)) { trap; };
+
         when ivec_get(scratch.picked,item) == 0 && vec_get(scratch.scores,item) > score {
             best = item; score = vec_get(scratch.scores,item);
         };

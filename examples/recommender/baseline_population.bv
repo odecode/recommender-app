@@ -8,7 +8,7 @@ import { Ok, Err, is_ok, is_err, unwrap, unwrap_err } from "std/result.bv";
 obj BaselineArrays {
     users: IntVec;
     items: IntVec;
-    ratings: Vector;
+    ratings: FloatVector;
     count: Int;
 };
 

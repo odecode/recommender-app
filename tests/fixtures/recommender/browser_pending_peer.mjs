@@ -53,6 +53,9 @@ try {
       fail(index, reason = 'fixture network failure') { this.requests[index].reject(new TypeError(reason)); },
       message(text) { this.sockets.at(-1)?.emit('message', text); } };
     window.__pendingPeer = peer;
+    window.__holdTimers = false;
+    const nativeSetTimeout = window.setTimeout.bind(window);
+    window.setTimeout = (fn, ms, ...args) => window.__holdTimers ? 0 : nativeSetTimeout(fn, ms, ...args);
     window.fetch = (input, init = {}) => {
       const url = String(input);
       if (new URL(url, location.href).pathname.endsWith('/app.wasm')) return nativeFetch(input, init);
@@ -121,7 +124,8 @@ try {
   await page.evaluate(text => window.__pendingPeer.message(text), JSON.stringify(refreshed));
   assert.equal(await page.locator('#recommendations li').count(), 1);
 
-  await page.evaluate(() => window.__pendingPeer.sockets.at(-1).close());
+  await page.evaluate(() => { window.__holdTimers = true; window.__pendingPeer.sockets.at(-1).close(); });
+  await page.getByText('Reconnecting', { exact: true }).waitFor();
   await page.locator('.movie-list li').filter({ has: page.getByText('Movie 7', { exact: true }) }).getByRole('button').click();
   await page.getByRole('button', { name: '5 stars', exact: true }).click();
   await page.locator('#save-rating').click();
@@ -133,6 +137,7 @@ try {
   const saveEvent = event('accepted', 7, { operation_id: fallback.operation_id, item_id: 6, rating: 5 });
   await page.evaluate(({ index, body }) => window.__pendingPeer.respond(index, 202, body), { index: submitIndex, body: JSON.stringify(saveEvent) });
   await page.getByText('accepted', { exact: false }).waitFor();
+  await page.evaluate(() => { window.__holdTimers = false; window.dispatchEvent(new CustomEvent('recommender-reconnect')); });
   await page.waitForFunction(() => window.__pendingPeer.sockets.length >= 2);
   await page.getByText('Live', { exact: true }).waitFor();
   const newerRecommendations = event('recommendations', 7, { model_generation: '1', job_id: '3', attempt: 1,
@@ -146,7 +151,8 @@ try {
   await page.getByText('Rating saved.', { exact: true }).waitFor();
   assert.equal(await page.locator('#recommendations li').count(), 1);
 
-  await page.evaluate(() => window.__pendingPeer.sockets.at(-1).close());
+  await page.evaluate(() => { window.__holdTimers = true; window.__pendingPeer.sockets.at(-1).close(); });
+  await page.getByText('Reconnecting', { exact: true }).waitFor();
   const submitCountBeforeFailure = await page.evaluate(() => window.__pendingPeer.requests.filter(request => request.url.includes('/v1/ratings')).length);
   await page.locator('.movie-list li').filter({ has: page.getByText('Movie 8', { exact: true }) }).getByRole('button').click();
   await page.getByRole('button', { name: '2 stars', exact: true }).click();
@@ -158,6 +164,8 @@ try {
   await page.waitForFunction(() => window.__pendingPeer.requests.some(request => request.url.includes('/v1/operations/status')));
   await page.locator('#check-save-status').waitFor({ state: 'visible' });
   assert.equal(await page.evaluate(() => window.__pendingPeer.requests.filter(request => request.url.includes('/v1/ratings')).length), 2);
+  await page.evaluate(() => { window.__holdTimers = false; window.dispatchEvent(new CustomEvent('recommender-reconnect')); });
+  await page.waitForFunction(() => window.__pendingPeer.sockets.length >= 3);
   const beforeUnloadPrevented = await page.evaluate(() => {
     const attempt = new Event('beforeunload', { cancelable: true });
     window.dispatchEvent(attempt);

@@ -205,6 +205,8 @@ defn server_with_live_sessions(state: ServerState, sessions: List<LiveSession>) 
 };
 
 defn server_track_live_session(state: ServerState, slot: Int, owner: Int, token: String) -> ServerState {
+    when !(slot >= 0) { trap; };
+    when !(slot < state.reactor.capacity) { trap; };
     let row: Int = reactor_row(state.reactor,slot);
     let fd: Int = Load#(row,8);
     when fd < 0 || owner < 1 || token .^Length != 32 { term state; };
@@ -250,7 +252,10 @@ defn server_revoked_token(old: SessionStore, next: SessionStore, idx: Int) -> St
 defn server_close_token_channels(state: ServerState, token: String) -> Bool {
     foreach idx in 0..state.live_sessions .^Length {
         let live: LiveSession = state.live_sessions[idx];
+        when !((live.slot >= 0)) { trap; };
+        when !((live.slot < state.reactor.capacity)) { trap; };
         when live.token == token {
+
             let row: Int = reactor_row(state.reactor,live.slot);
             when Load#(row,8) == live.fd && Load#(row+16,8) == 1 && Load#(row+112,8) == 0 {
                 io_ws_close(state.reactor,live.slot,1008);
@@ -680,7 +685,10 @@ defn server_encode_accepted(accepted: RatingAccepted) -> String {
 defn server_publish_owner(state: ServerState, owner: Int, text: String) -> Bool {
     foreach idx in 0..state.live_sessions .^Length {
         let live: LiveSession = state.live_sessions[idx];
+        when !((live.slot >= 0)) { trap; };
+        when !((live.slot < state.reactor.capacity)) { trap; };
         when session_account(state.sessions,live.token) == owner {
+
             let row: Int = reactor_row(state.reactor,live.slot);
             when Load#(row,8) == live.fd && Load#(row+16,8) == 1 && Load#(row+112,8) == 0 {
                 io_queue(state.reactor,live.slot,ws_encode_text(text));

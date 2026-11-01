@@ -9,17 +9,32 @@ import "std/matrix.bv";
 // 2026-10-21: memoize the two stages of the existing equations, never widen
 // the final pair's observed union. Row/column orientation is data, not separate
 // algorithms. Retire only when general memoization derives the same reuse.
-obj PreparedRows { off: IntVec; key: IntVec; value: Vector; mean: Vector; count: Int; width: Int; };
-obj PreparedSpace { rows: PreparedRows; columns: PreparedRows; base: Matrix; filled: Matrix; };
+obj PreparedRows { off: IntVec; key: IntVec; value: FloatVector; mean: FloatVector; count: Int; width: Int; };
+obj PreparedSpace { rows: PreparedRows; columns: PreparedRows; base: FloatMatrix; filled: FloatMatrix; };
 
-defn prepared_base(rows: PreparedRows) -> Matrix {
-    let base: Matrix = mat_new(rows.count,rows.count);
+defn prepared_base(rows: PreparedRows) -> FloatMatrix {
+    when !(rows.count >= 1) { trap; };
+    let base: FloatMatrix = mat_new(rows.count,rows.count);
     foreach a in 0..rows.count {
+        when !((a >= 0)) { trap; };
+        when !((a < rows.off.len)) { trap; };
         foreach b in 0..(a+1) {
+            when !((b >= 0)) { trap; };
+            when !((b < rows.off.len)) { trap; };
+            when !((ivec_get(rows.off, a) >= 0)) { trap; };
+            when !((ivec_get(rows.off, b) >= 0)) { trap; };
+            when !(a < rows.mean.len) { trap; };
+            when !(b < rows.mean.len) { trap; };
+            when !(a + 1 < rows.off.len) { trap; };
+            when !(b + 1 < rows.off.len) { trap; };
             let (num,da,db): (Float,Float,Float) = overlap_acc(
                 rows.key,rows.value,rows.key,rows.value,vec_get(rows.mean,a),vec_get(rows.mean,b),
                 ivec_get(rows.off,a),ivec_get(rows.off,a+1),ivec_get(rows.off,b),ivec_get(rows.off,b+1),0.0,0.0,0.0);
             let value: Float = pcc_finish(num,da,db);
+            when !(a < base.rows) { trap; };
+            when !(b < base.rows) { trap; };
+            when !(a < base.cols) { trap; };
+            when !(b < base.cols) { trap; };
             mat_set(base,a,b,value); mat_set(base,b,a,value);
         };
     };
@@ -27,45 +42,107 @@ defn prepared_base(rows: PreparedRows) -> Matrix {
 };
 
 defn prepared_cell(space: PreparedSpace, row: Int, col: Int) -> Float {
+    when !((col >= 0)) { trap; };
+    when !((col < space.columns.off.len)) { trap; };
+    when !((row >= 0)) { trap; };
+    when !((row < space.rows.off.len)) { trap; };
+    when !((col + 1) >= 0) { trap; };
+
+    when !(col >= 0) { trap; };
+
+    when !((row + 1) >= 0) { trap; };
+
+    when !(row >= 0) { trap; };
+
+    when !(ivec_get(space.rows.off, row) >= 0) { trap; };
+
+
+    when !(col + 1 < space.columns.off.len) { trap; };
+    when !(row + 1 < space.rows.off.len) { trap; };
+    when !(ivec_get(space.rows.off,row+1) >= ivec_get(space.rows.off,row)) { trap; };
     let observed: Float = lookup_row(space.rows.key,space.rows.value,col,
         ivec_get(space.rows.off,row),ivec_get(space.rows.off,row+1));
     when observed >= 0.0 { term observed; };
     let accum: Float = 0.0;
     let weight: Float = 0.0;
     foreach idx in ivec_get(space.columns.off,col)..ivec_get(space.columns.off,col+1) {
+        when !(idx >= 0) { trap; };
+        when !(idx < space.columns.key.len) { trap; };
+        when !(idx < space.columns.value.len) { trap; };
         let neighbor: Int = ivec_get(space.columns.key,idx);
+        when !(neighbor >= 0) { trap; };
         when neighbor != row {
+            when !(row < space.base.rows) { trap; };
+            when !(neighbor < space.base.cols) { trap; };
+            when !(neighbor < space.rows.mean.len) { trap; };
             let sim: Float = mat_get(space.base,row,neighbor);
             accum = accum + sim*(vec_get(space.columns.value,idx)-vec_get(space.rows.mean,neighbor));
             weight = weight + Fabs#(sim);
         };
     };
+    when !(row < space.rows.mean.len) { trap; };
     let mean: Float = vec_get(space.rows.mean,row);
     when weight <= 0.0 { term mean; };
     term mean + accum/weight;
 };
 
 defn prepared_space(rows: PreparedRows, columns: PreparedRows) -> PreparedSpace {
+    when !((rows.count >= 1)) { trap; };
+    when !((rows.width >= 1)) { trap; };
+    when !(rows.count >= 1) { trap; };
+
     let space: PreparedSpace = PreparedSpace { rows: rows, columns: columns,
         base: prepared_base(rows), filled: mat_new(rows.count,rows.width) };
     foreach row in 0..rows.count {
-        foreach col in 0..rows.width { mat_set(space.filled,row,col,prepared_cell(space,row,col)); };
+        when !((row >= 0)) { trap; };
+        when !((row < space.filled.rows)) { trap; };
+        foreach col in 0..rows.width {
+            when !(col >= 0) { trap; };
+            when !(col < space.filled.cols) { trap; };
+            mat_set(space.filled,row,col,prepared_cell(space,row,col)); };
     };
     term space;
 };
 
 defn prepared_pair(space: PreparedSpace, a: Int, b: Int) -> Float {
+    when !(((b + 1) >= 0)) { trap; };
+    when !(((b + 1) < space.rows.off.len)) { trap; };
+    when !(((a + 1) >= 0)) { trap; };
+    when !(((a + 1) < space.rows.off.len)) { trap; };
+    when !((a >= 0)) { trap; };
+    when !((a < space.rows.off.len)) { trap; };
+    when !(b >= 0) { trap; };
+
+    when !(a >= 0) { trap; };
+
+    when !((b + 1) >= 0) { trap; };
+
+    when !((a + 1) >= 0) { trap; };
+
+    when !(b < space.rows.off.len) { trap; };
+
     let ia: Int = ivec_get(space.rows.off,a);
     let ib: Int = ivec_get(space.rows.off,b);
     let enda: Int = ivec_get(space.rows.off,a+1);
     let endb: Int = ivec_get(space.rows.off,b+1);
+    when !(ia >= 0) { trap; };
+    when !(ib >= 0) { trap; };
     let num: Float = 0.0; let da: Float = 0.0; let db: Float = 0.0;
+    when !(a < space.rows.mean.len) { trap; };
+    when !(b < space.rows.mean.len) { trap; };
     let ma: Float = vec_get(space.rows.mean,a);
     let mb: Float = vec_get(space.rows.mean,b);
+    when !(ia <= enda) { trap; };
+    when !(ib <= endb) { trap; };
     let limit: Int = enda+endb-ia-ib;
     foreach step in 0..limit {
         when ia >= enda && ib >= endb { term pcc_finish(num,da,db); };
+
         let key: Int = sim_next_item(space.rows.key,ia,enda,space.rows.key,ib,endb);
+        when !(a < space.filled.rows) { trap; };
+        when !(b < space.filled.rows) { trap; };
+        when !(key >= 0) { trap; };
+        when !(key < space.filled.cols) { trap; };
         let va: Float = mat_get(space.filled,a,key)-ma;
         let vb: Float = mat_get(space.filled,b,key)-mb;
         num = num+va*vb; da = da+va*va; db = db+vb*vb;
@@ -75,12 +152,20 @@ defn prepared_pair(space: PreparedSpace, a: Int, b: Int) -> Float {
     term pcc_finish(num,da,db);
 };
 
-defn prepared_matrix(rows: PreparedRows, columns: PreparedRows) -> Matrix {
+defn prepared_matrix(rows: PreparedRows, columns: PreparedRows) -> FloatMatrix {
+    when !(rows.count >= 1) { trap; };
     let space: PreparedSpace = prepared_space(rows,columns);
-    let matrix: Matrix = mat_new(rows.count,rows.count);
+    let matrix: FloatMatrix = mat_new(rows.count,rows.count);
     foreach a in 0..rows.count {
         foreach b in 0..(a+1) {
+            when !((b >= 0)) { trap; };
+            when !((b < matrix.rows)) { trap; };
+            when !((a >= 0)) { trap; };
+            when !((a < matrix.cols)) { trap; };
+            when !((a < matrix.rows)) { trap; };
+            when !((b < matrix.cols)) { trap; };
             let sim: Float = prepared_pair(space,a,b);
+
             mat_set(matrix,a,b,sim); mat_set(matrix,b,a,sim);
         };
     };

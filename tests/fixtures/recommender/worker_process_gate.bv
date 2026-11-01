@@ -126,7 +126,7 @@ defn worker_test_snapshot() -> Result<ModelDescriptor,String> {
     let identity: String = "worker-fixture-"+syscall(SYS_GETPID) as String;
     let path: String = "/tmp/"+identity+".snapshot";
     let source_users: IntVec = ivec_new(64); let source_items: IntVec = ivec_new(64);
-    let source_values: Vector = vec_new(64);
+    let source_values: FloatVector = vec_new(64);
     foreach item in 0..64 { ivec_set(source_users,item,item/8); ivec_set(source_items,item,item%8); vec_set(source_values,item,((item%5)+1) as Float); };
     let population: RatingPopulation = pop_build(source_users,source_items,source_values,64,8,8);
     let means: Means = means_build(population);

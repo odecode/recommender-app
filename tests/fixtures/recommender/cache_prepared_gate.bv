@@ -29,7 +29,7 @@ defn prepared_equal(pop: RatingPopulation) -> Bool {
 defn prepared_sparse(size: Int) -> RatingPopulation {
     let users: IntVec = ivec_new(size*size);
     let items: IntVec = ivec_new(size*size);
-    let values: Vector = vec_new(size*size);
+    let values: FloatVector = vec_new(size*size);
     let count: Int = 0;
     foreach user in 0..size {
         foreach item in 0..size {

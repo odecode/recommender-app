@@ -18,6 +18,10 @@ defn model_revision(conn: PgConn) -> Result<String,PgResult> {
     when result.nrows != 1 { term Err(store_error("Missing population revision; recreate the schema before loading recommendations.")); };
     let key: String = "";
     foreach col in 0..4 {
+        when !((0 < result.nrows)) { trap; };
+        when !((col >= 0)) { trap; };
+        when !((col < result.ncols)) { trap; };
+
         let value: String = pg_row_text(result,0,col);
         key = key + value .^Length as String + ":" + value;
     };
@@ -114,9 +118,15 @@ defn model_image_valid(image: String, revision: String, baseline: Int, items: In
 defn model_decode(image: String) -> ServerModel {
     let data: Int = ((image as Data) as Int)+8;
     let nu: Int = Load#(data+8,8); let ni: Int = Load#(data+16,8); let nnz: Int = Load#(data+24,8);
+    when !(nu >= 1) { trap; };
+    when !(ni >= 1) { trap; };
+    when !((ni + 1) >= 1) { trap; };
+    when !((nu + 1) >= 1) { trap; };
     let key: Int = Load#(data+48,8); let count: Int = Load#(data+40,8);
     let capacity: Int = nnz+1;
-    let pop: RatingPopulation = RatingPopulation { user_off: ivec_new(nu+1), user_item: ivec_new(capacity),
+    when !(capacity >= 1) { trap; };
+    let pop: RatingPopulation = RatingPopulation {
+ user_off: ivec_new(nu+1), user_item: ivec_new(capacity),
         user_val: vec_new(capacity), item_off: ivec_new(ni+1), item_user: ivec_new(capacity),
         item_val: vec_new(capacity), nusers: nu, nitems: ni, nnz: nnz };
     let global: Ptr<Float> = (data+72) as Ptr<Float>;
