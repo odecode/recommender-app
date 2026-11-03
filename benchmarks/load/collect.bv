@@ -1,0 +1,62 @@
+import "process_metrics.bv";
+import "schedule.bv";
+import "std/os/auxv.bv";
+
+defn collect_row(pid: Int, units: ProcessUnits, schedule: ArrivalSchedule, index: Int) -> Bool {
+    let before: Int = now_ns();
+    let batch: ArrivalBatch = arrival_poll(schedule,before,1);
+    let due: Int = arrival_due_ns(schedule,batch.first);
+    let result: Result<ProcessObservation,Int> = process_observe(pid);
+    when is_err(result) {
+        println!("error,{},{},{},{},{},{},{},{},,,,,,,,,{},{}",
+            index,batch.first,batch.missed,due,before,now_ns(),unwrap_err(result),pid,units.page_bytes,units.ticks_per_second);
+        term false;
+    };
+    let sample: ProcessObservation = unwrap(result);
+    let stat: ProcStat = sample.stat;
+    println!("sample,{},{},{},{},{},{},0,{},{},{},{},{},{},{},{},{},{},{}",
+        index,batch.first,batch.missed,due,sample.before_ns,sample.after_ns,
+        stat.pid,stat.start_ticks,stat.user_ticks,stat.system_ticks,
+        stat.minor_faults,stat.major_faults,stat.threads,stat.virtual_bytes,
+        stat.resident_pages,units.page_bytes,units.ticks_per_second);
+    term true;
+};
+
+// Tail recursion keeps only the current observation. Scheduling consumes late
+// arrivals explicitly; output delays remain visible instead of shifting time.
+defn collect_samples(pid: Int, units: ProcessUnits, schedule: ArrivalSchedule, remaining: Int, index: Int, failed: Int) -> Int {
+    when remaining == 0 { term failed; };
+    let due: Int = arrival_due_ns(schedule,schedule.offered);
+    let now: Int = now_ns();
+    when now < due {
+        let delay: Int = due - now;
+        let result: Int = sleep_ms(delay / 1000000 + (delay % 1000000 != 0) as Int);
+        when result != 0 && result != -4 { term result; };
+        term collect_samples(pid,units,schedule,remaining,index,failed);
+    };
+    let valid: Bool = collect_row(pid,units,schedule,index);
+    let failures: Int = failed;
+    when !valid { failures += 1; };
+    term collect_samples(pid,units,schedule,remaining-1,index+1,failures);
+};
+
+let done: Bool = false;
+node main [!done][done] {
+    let pid: Int = get_env_int!("LOAD_PID");
+    let rate: Int = get_env_int!("LOAD_HZ");
+    let samples: Int = get_env_int!("LOAD_SAMPLES");
+    when pid == 0 { pid = SysCall#(39); };
+    when rate == 0 { rate = 1; };
+    when samples == 0 { samples = 10; };
+    when pid < 1 || rate < 1 || rate > 1000 || samples < 1 || samples > 1000000 { endprogram 64; };
+    let queried: Result<ProcessUnits,Int> = process_units();
+    when is_err(queried) { println!("fatal,units,{}",unwrap_err(queried)); endprogram 65; };
+    let units: ProcessUnits = unwrap(queried);
+    println!("kind,sample,arrival,missed,scheduled_ns,before_ns,after_ns,error,pid,start_ticks,user_ticks,system_ticks,minor_faults,major_faults,threads,virtual_bytes,resident_pages,page_bytes,ticks_per_second");
+    let schedule: ArrivalSchedule = arrival_schedule(now_ns(),rate);
+    let result: Int = collect_samples(pid,units,schedule,samples,0,0);
+    when result < 0 { println!("fatal,sleep,{}",result); endprogram 66; };
+    when result > 0 { endprogram 2; };
+    done = true;
+    endprogram;
+};

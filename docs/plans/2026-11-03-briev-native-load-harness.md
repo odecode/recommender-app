@@ -121,3 +121,30 @@ identities. Synthetic and live-process gates pass, including counter resets,
 invalid sample intervals and overflow. The reusable Linux stat reader lives in
 Briev's `std/os/proc_stat.bv`; it retains ticks/pages for explicit unit conversion.
 Periodic export, worker discovery and private/PSS memory sampling remain ahead.
+
+## Periodic collector increment
+
+Add a standalone Briev collector using the existing monotonic arrival scheduler
+and process observations. Stream raw CSV rows without retaining history; record
+missed sample arrivals, bracket timestamps, identity and read errors. Query Linux
+auxiliary-vector page size and clock frequency rather than assuming units.
+Initial mode monitors one explicit PID (or itself for validation); process-tree
+discovery remains separate. Validate schema, known errors, scheduling and a live
+run before claiming this collector ready for endurance measurements. Update the
+load README with configuration and limits; no app capacity claim is made.
+
+Collector functional gate is green: success/error CSV rows have 19 fields,
+independent units and ordered timestamps; failed reads exit 2. The self-preflight
+and Valgrind checks found retained file, format and parsed-value allocations.
+Compiler work is tracked in 2026-11-03-collector-lifetime-closure.md; no soak
+readiness is claimed. While those fixes validate, add bounded per-operation
+latency/outcome accounting with reusable attempt slots, duplicate-completion
+rejection and separate scheduled-to-finish, service and scheduling-lag histograms.
+Synthetic gates must cover success, application/transport/validation failure,
+timeout and unfinished requests before attaching real network journeys.
+
+Validation checkpoint: collector schema/unit/error gates and attempt accounting
+pass. Attempt gates cover overlapping/out-of-order completions, slot reuse, all
+five outcomes, per-outcome latency distributions, pending denominators and 11
+invalid lifecycle/timestamp/overflow cases. The 5,000-sample memory preflight
+remains a failed readiness gate; no endurance or backend capacity claim follows.

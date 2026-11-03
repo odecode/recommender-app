@@ -1,0 +1,37 @@
+import "../metrics.bv";
+
+let done: Bool = false;
+node main [!done][done] {
+    let metrics: OperationMetrics = operation_metrics(1,100,100);
+    let first: AttemptSlot = attempt_slot();
+    let second: AttemptSlot = attempt_slot();
+    attempt_begin(first,metrics,1000,1200);
+    attempt_begin(second,metrics,1100,1300);
+    when metrics.started != 2 || metrics.inflight != 2 || metrics.finished != 0 { endprogram 1; };
+    attempt_finish(second,metrics,2100,OUTCOME_TIMEOUT);
+    when metrics.inflight != 1 || !first.active || second.active { endprogram 2; };
+    attempt_finish(first,metrics,2000,OUTCOME_OK);
+    foreach outcome in 2..6 {
+        attempt_begin(first,metrics,3000,3200);
+        attempt_finish(first,metrics,4000,outcome);
+    };
+    when metrics.started != 6 || metrics.finished != 6 || metrics.inflight != 0 { endprogram 3; };
+    when metrics.succeeded != 1 || metrics.application_errors != 1 || metrics.transport_errors != 1 ||
+         metrics.timed_out != 2 || metrics.validation_errors != 1 { endprogram 4; };
+    when metrics.total_latency.count != 6 || metrics.service_latency.count != 6 || metrics.scheduling_lag.count != 6 { endprogram 5; };
+    when histogram_quantile(metrics.total_latency,990) != 1099 { endprogram 6; };
+    when histogram_quantile(metrics.service_latency,990) != 899 { endprogram 7; };
+    when histogram_quantile(metrics.scheduling_lag,990) != 299 { endprogram 8; };
+    foreach outcome in 1..6 {
+        let distribution: OutcomeLatency = outcome_distribution(metrics,outcome);
+        let expected: Int = 1;
+        when outcome == OUTCOME_TIMEOUT { expected = 2; };
+        when distribution.total.count != expected || distribution.service.count != expected { endprogram 10; };
+        when histogram_quantile(distribution.total,990) != 1099 { endprogram 11; };
+    };
+    attempt_begin(second,metrics,5000,5200);
+    when metrics.inflight != 1 || metrics.finished != 6 || metrics.scheduling_lag.count != 7 { endprogram 9; };
+    println!("attempt_counts_outcomes_and_latency_denominators_ok");
+    done = true;
+    endprogram;
+};
