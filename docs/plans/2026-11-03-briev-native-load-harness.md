@@ -114,3 +114,10 @@ Compiler validation update: the remaining library suite passes 3,437 tests
 with zero failures and the single delegated conformance sweep excluded.
 All five native prerequisite fixtures and both clock/bounds integrations pass.
 The monotonic clock change is committed as `a8434136` in the compiler checkout.
+
+Process sampling increment: `process_metrics.bv` brackets reads with monotonic
+timestamps and calculates CPU/fault deltas only across matching process
+identities. Synthetic and live-process gates pass, including counter resets,
+invalid sample intervals and overflow. The reusable Linux stat reader lives in
+Briev's `std/os/proc_stat.bv`; it retains ticks/pages for explicit unit conversion.
+Periodic export, worker discovery and private/PSS memory sampling remain ahead.

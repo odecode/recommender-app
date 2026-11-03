@@ -1,0 +1,36 @@
+import "../process_metrics.bv";
+
+defn sample_at(start_ticks: Int, before_ns: Int, user_ticks: Int) -> ProcessObservation {
+    term ProcessObservation {
+        stat: ProcStat { pid: 123, minor_faults: user_ticks, major_faults: 0,
+            user_ticks: user_ticks, system_ticks: 2, threads: 1,
+            start_ticks: start_ticks, virtual_bytes: 4096, resident_pages: 1 },
+        before_ns: before_ns, after_ns: before_ns + 10
+    };
+};
+let done: Bool = false;
+node main [!done][done] {
+    let first: ProcessObservation = sample_at(7,100,10);
+    let second: ProcessObservation = sample_at(7,200,15);
+    let result: Result<ProcessDelta,Int> = process_delta(first,second);
+    when is_err(result) { endprogram 1; };
+    let delta: ProcessDelta = unwrap(result);
+    when delta.elapsed_ns != 100 || delta.cpu_ticks != 5 || delta.minor_faults != 5 { endprogram 2; };
+    when !is_err(process_delta(first,sample_at(8,200,15))) { endprogram 3; };
+    when !is_err(process_delta(first,sample_at(7,200,9))) { endprogram 4; };
+    when !is_err(process_delta(first,sample_at(7,99,15))) { endprogram 5; };
+    when !is_err(process_delta(sample_at(7,100,0 - 1),second)) { endprogram 10; };
+    let overflow: ProcessObservation = sample_at(7,300,9223372036854775807);
+    overflow.stat.system_ticks = 9223372036854775807;
+    when !is_err(process_delta(first,overflow)) { endprogram 11; };
+    let pid: Int = SysCall#(39);
+    let live_first: Result<ProcessObservation,Int> = process_observe(pid);
+    when is_err(live_first) { endprogram 6; };
+    when sleep_ms(2) < 0 { endprogram 7; };
+    let live_second: Result<ProcessObservation,Int> = process_observe(pid);
+    when is_err(live_second) { endprogram 8; };
+    when is_err(process_delta(unwrap(live_first),unwrap(live_second))) { endprogram 9; };
+    println!("process_identity_and_counter_deltas_ok");
+    done = true;
+    endprogram;
+};
