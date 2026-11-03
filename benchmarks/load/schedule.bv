@@ -1,0 +1,57 @@
+// Fixed-rate arrivals use monotonic nanoseconds and integer arithmetic.
+// 2026-11-03: advance offered demand even when dispatch capacity is exhausted;
+// otherwise an overloaded generator silently makes the target look healthy.
+// Replace only with a scheduler preserving explicit missed-arrival accounting.
+obj ArrivalSchedule {
+    start_ns: Int;
+    rate: Int;
+    offered: Int;
+    dispatched: Int;
+    missed: Int;
+    last_poll_ns: Int;
+};
+
+obj ArrivalBatch { first: Int; count: Int; missed: Int; };
+
+defn arrival_schedule(start_ns: Int, rate: Int) -> ArrivalSchedule {
+    when start_ns < 0 || rate < 1 || rate > 1000000000 { trap; };
+    term ArrivalSchedule {
+        start_ns: start_ns, rate: rate, offered: 0,
+        dispatched: 0, missed: 0, last_poll_ns: start_ns
+    };
+};
+
+// Arrival zero is due at start. Ceiling division avoids early dispatch and
+// accumulated rounding error at rates that do not divide one billion.
+defn arrival_due_ns(schedule: ArrivalSchedule, index: Int) -> Int {
+    when index < 0 { trap; };
+    let seconds: Int = index / schedule.rate;
+    let remainder: Int = index % schedule.rate;
+    let fraction: Int = (remainder * 1000000000 + schedule.rate - 1) / schedule.rate;
+    when fraction > 9223372036854775807 - schedule.start_ns { trap; };
+    when seconds > (9223372036854775807 - schedule.start_ns - fraction) / 1000000000 { trap; };
+    term schedule.start_ns + seconds * 1000000000 + fraction;
+};
+
+// Capacity is the number of actions the caller can launch now. A poll consumes
+// all due demand: excess arrivals are reported as missed, never queued forever.
+// Dispatch the earliest arrivals in the returned batch and measure their lag
+// against arrival_due_ns, not against the time this poll happened.
+defn arrival_poll(schedule: ArrivalSchedule, now_ns: Int, capacity: Int) -> ArrivalBatch {
+    when now_ns < schedule.last_poll_ns || capacity < 0 { trap; };
+    let elapsed: Int = now_ns - schedule.start_ns;
+    let seconds: Int = elapsed / 1000000000;
+    let fraction: Int = ((elapsed % 1000000000) * schedule.rate) / 1000000000;
+    when seconds > (9223372036854775806 - fraction) / schedule.rate { trap; };
+    let total: Int = seconds * schedule.rate + fraction + 1;
+    let pending: Int = total - schedule.offered;
+    let dispatch: Int = pending;
+    when dispatch > capacity { dispatch = capacity; };
+    let first: Int = schedule.offered;
+    let missed: Int = pending - dispatch;
+    schedule.offered = total;
+    schedule.dispatched += dispatch;
+    schedule.missed += missed;
+    schedule.last_poll_ns = now_ns;
+    term ArrivalBatch { first: first, count: dispatch, missed: missed };
+};

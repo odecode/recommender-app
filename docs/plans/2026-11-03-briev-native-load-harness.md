@@ -101,3 +101,16 @@ CI; it is excluded from local execution. No capacity or soak result exists yet.
 Next delivery remains the incremental client transport and one verified real
 user journey. Process observation also needs a real stdlib implementation:
 the reserved `std/os/resource.bv` module currently supplies no functionality.
+
+Scheduler increment: `benchmarks/load/schedule.bv` now provides fixed-rate
+arrival deadlines, bounded dispatch batches and explicit missed-demand counts.
+Its native gates pass fractional-rate boundaries, delayed/repeated polls,
+zero capacity, three simulated days at the maximum representable rate, and
+seven invalid-input/overflow cases. This validates arithmetic, not throughput.
+`benchmarks/load/check.sh` supplies reproducible external-compiler build/test
+commands; production workload logic remains Briev.
+
+Compiler validation update: the remaining library suite passes 3,437 tests
+with zero failures and the single delegated conformance sweep excluded.
+All five native prerequisite fixtures and both clock/bounds integrations pass.
+The monotonic clock change is committed as `a8434136` in the compiler checkout.

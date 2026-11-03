@@ -1,0 +1,26 @@
+import "../schedule.bv";
+let done: Bool = false;
+node main [!done][done] {
+    let schedule: ArrivalSchedule = arrival_schedule(100,3);
+    let first: ArrivalBatch = arrival_poll(schedule,100,1);
+    when first.first != 0 || first.count != 1 || first.missed != 0 { endprogram 1; };
+    when arrival_due_ns(schedule,1) != 333333434 { endprogram 2; };
+    let early: ArrivalBatch = arrival_poll(schedule,333333433,1);
+    when early.count != 0 { endprogram 3; };
+    let due: ArrivalBatch = arrival_poll(schedule,333333434,1);
+    when due.first != 1 || due.count != 1 { endprogram 4; };
+    let delayed: ArrivalBatch = arrival_poll(schedule,2000000100,2);
+    when delayed.first != 2 || delayed.count != 2 || delayed.missed != 3 { endprogram 5; };
+    when schedule.offered != 7 || schedule.dispatched != 4 || schedule.missed != 3 { endprogram 6; };
+    let repeat: ArrivalBatch = arrival_poll(schedule,2000000100,10);
+    when repeat.count != 0 || repeat.missed != 0 { endprogram 7; };
+    let blocked: ArrivalBatch = arrival_poll(schedule,3000000100,0);
+    when blocked.count != 0 || blocked.missed != 3 { endprogram 8; };
+    let long_run: ArrivalSchedule = arrival_schedule(0,1000000000);
+    let long_batch: ArrivalBatch = arrival_poll(long_run,259200000000000,0);
+    when long_batch.missed != 259200000000001 { endprogram 9; };
+    when arrival_due_ns(long_run,259200000000000) != 259200000000000 { endprogram 10; };
+    println!("arrival_deadlines_and_missed_demand_ok");
+    done = true;
+    endprogram;
+};

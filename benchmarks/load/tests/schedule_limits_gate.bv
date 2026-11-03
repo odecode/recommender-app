@@ -1,0 +1,19 @@
+import "../schedule.bv";
+let done: Bool = false;
+node main [!done][done] {
+    let scenario: Int = get_env_int!("CASE");
+    when scenario == 1 { arrival_schedule(0,0); };
+    when scenario == 2 { arrival_schedule(0 - 1,1); };
+    let schedule: ArrivalSchedule = arrival_schedule(100,3);
+    when scenario == 3 { arrival_poll(schedule,99,1); };
+    when scenario == 4 { arrival_poll(schedule,100,0 - 1); };
+    let latest: ArrivalSchedule = arrival_schedule(9223372036854775807,3);
+    when arrival_due_ns(latest,0) != 9223372036854775807 { endprogram 10; };
+    when scenario == 5 { arrival_due_ns(latest,1); };
+    let fastest: ArrivalSchedule = arrival_schedule(0,1000000000);
+    when scenario == 6 { arrival_poll(fastest,9223372036854775807,0); };
+    when scenario == 7 { arrival_due_ns(schedule,0 - 1); };
+    println!("arrival_valid_limit_ok");
+    done = true;
+    endprogram;
+};
