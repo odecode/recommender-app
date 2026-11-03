@@ -105,9 +105,9 @@ defn api_recommendations(model: ServerModel, state: AccountState, lambda: Float)
     when !(active.model.population.nitems >= 1) { trap; };
     trace_stage("active_build",build_started);
     let predict_started: Int = trace_clock();
-    let scores: FloatVector = vec_new(active.model.population.nitems);
-    let picked: IntVec = ivec_new(active.model.population.nitems);
-    foreach item in 0..active.model.population.nitems {
+    let scores: FloatVector = vec_new(model.population.nitems);
+    let picked: IntVec = ivec_new(model.population.nitems);
+    foreach item in 0..model.population.nitems {
         ivec_set(picked,item,0);
         when api_rated(state,item) { ivec_set(picked,item,1); };
         let score: Float = clamp15(lambda * active_user_prediction(active,item) + (1.0-lambda) * active_item_prediction(active,item));

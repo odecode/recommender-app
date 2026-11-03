@@ -7,6 +7,12 @@ numbers displayed in the UI are one-based; the HTTP/WebSocket protocol uses
 zero-based item IDs. Updating an existing rating does not count as another
 distinct movie.
 
+Choosing a movie reads its title and updates selection flags using only the
+visible page (at most 12 cards), preserving titles, ratings and page order.
+Choosing does not filter the catalogue, recompute rating overlays, or send a
+request. Search, pagination and profile updates remain responsible for
+refreshing catalogue contents.
+
 The native `GET /movies` endpoint returns the ordered MovieLens catalogue with
 each zero-based `item_id` and UTF-8 `title`. The UI improvement plan in
 `.kiro/specs/recommender-app/tasks-uiux-improvement.md` migrates the current
@@ -137,3 +143,9 @@ generic callable transactions use concrete element layouts; String decoding
 uses UTF-8; unchanged text is not rewritten on repeated flushes. Window events
 on the same element retain their individual handlers. WASM lowering promotes
 allocas and eliminates eligible tail recursion before stack-machine emission.
+
+Search input uses `b-bind:value="movie_search"`, which routes input text to
+the field's writer transaction, `search_changed`. Do not add a second
+parameterless input trigger for that transaction: it runs after the bound
+call without the query and clears the filter. The browser pending-peer
+fixture covers mixed-case matching, no matches, and clearing the search.

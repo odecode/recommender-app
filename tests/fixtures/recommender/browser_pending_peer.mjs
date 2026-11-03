@@ -95,12 +95,37 @@ try {
     body: JSON.stringify({ movies: Array.from({ length: 1682 }, (_, item_id) => ({ item_id, title: `Movie ${item_id + 1}` })) }) });
   await page.getByText('Live', { exact: true }).waitFor();
 
+  const search = page.locator('#movie-search');
+  await search.fill('mOvIe 1682');
+  await page.waitForFunction(() => document.querySelectorAll('.movie-list li').length === 1);
+  assert.match(await page.locator('.movie-list').innerText(), /Movie 1682/);
+  assert.equal(await search.inputValue(), 'mOvIe 1682');
+  await search.fill('no matching film');
+  await page.waitForFunction(() => document.querySelectorAll('.movie-list li').length === 0);
+  await search.fill('');
+  await page.waitForFunction(() => document.querySelectorAll('.movie-list li').length === 12);
+  await page.locator('.movie-list').getByText('Movie 1', { exact: true }).waitFor();
+
   const initial = event('recommendations', 5, { model_generation: '1', job_id: '1', attempt: 1,
     cold_start: false, recommendations: [{ item_id: 40, score: 4.5 }] });
   await page.evaluate(text => window.__pendingPeer.message(text), JSON.stringify(initial));
   await page.getByText('Movie 41', { exact: true }).waitFor();
+  assert.equal(await page.locator('#recommendations .score').first().innerText(), '4.5 / 5 predicted');
 
+  const requestsBeforeSelection = await page.evaluate(() => window.__pendingPeer.requests.length);
+  const pageBeforeSelection = await page.locator('#movie-page').innerText();
+  const ratingsBeforeSelection = await page.locator('#ratings').innerText();
+  const movieFive = page.locator('.movie-list li').filter({ has: page.getByText('Movie 5', { exact: true }) });
+  await movieFive.getByRole('button').click();
+  await movieFive.getByRole('button', { name: 'Selected', exact: true }).waitFor();
   await page.locator('.movie-list li').filter({ has: page.getByText('Movie 6', { exact: true }) }).getByRole('button').click();
+  await page.locator('.selected-title').getByText('Movie 6', { exact: true }).waitFor();
+  await movieFive.getByRole('button', { name: 'Choose', exact: true }).waitFor();
+  assert.equal(await page.locator('.select-movie.selected').count(), 1);
+  assert.equal(await page.locator('#movie-page').innerText(), pageBeforeSelection);
+  assert.equal(await page.locator('#ratings').innerText(), ratingsBeforeSelection);
+  assert.equal(await page.evaluate(() => window.__pendingPeer.requests.length), requestsBeforeSelection);
+  assert.equal(await page.evaluate(() => window.__pendingPeer.sent.length), 0);
   await page.getByRole('button', { name: '4 stars', exact: true }).click();
   await page.locator('#save-rating').click();
   await page.locator('#ratings').getByText('· saving', { exact: false }).waitFor();
@@ -121,14 +146,20 @@ try {
     cold_start: false, recommendations: [{ item_id: 41, score: 4.4 }] });
   await page.evaluate(text => window.__pendingPeer.message(text), JSON.stringify(refreshed));
   await page.getByText('Movie 42', { exact: true }).waitFor();
+  assert.equal(await page.locator('#recommendations .score').first().innerText(), '4.4 / 5 predicted');
   await page.evaluate(text => window.__pendingPeer.message(text), JSON.stringify(refreshed));
   assert.equal(await page.locator('#recommendations li').count(), 1);
 
-  await page.evaluate(() => { window.__holdTimers = true; window.__pendingPeer.sockets.at(-1).close(); });
-  await page.getByText('Reconnecting', { exact: true }).waitFor();
-  await page.locator('.movie-list li').filter({ has: page.getByText('Movie 7', { exact: true }) }).getByRole('button').click();
-  await page.getByRole('button', { name: '5 stars', exact: true }).click();
-  await page.locator('#save-rating').click();
+  // Keep close and submit in one event turn so reconnect timing cannot
+  // change this HTTP-fallback test into a live-channel submission.
+  await page.evaluate(() => {
+    window.__pendingPeer.sockets.at(-1).close();
+    const row = [...document.querySelectorAll('.movie-list li')]
+      .find(item => item.querySelector('strong').textContent === 'Movie 7');
+    row.querySelector('button').click();
+    document.querySelector('[aria-label="5 stars"]').click();
+    document.querySelector('#save-rating').click();
+  });
   await page.waitForFunction(() => window.__pendingPeer.requests.some(request => request.url.includes('/v1/ratings')));
   const submitIndex = await page.evaluate(() => window.__pendingPeer.requests.findIndex(request => request.url.includes('/v1/ratings')));
   const fallback = JSON.parse(await page.evaluate(index => window.__pendingPeer.requests[index].body, submitIndex));
@@ -151,12 +182,16 @@ try {
   await page.getByText('Rating saved.', { exact: true }).waitFor();
   assert.equal(await page.locator('#recommendations li').count(), 1);
 
-  await page.evaluate(() => { window.__holdTimers = true; window.__pendingPeer.sockets.at(-1).close(); });
-  await page.getByText('Reconnecting', { exact: true }).waitFor();
-  const submitCountBeforeFailure = await page.evaluate(() => window.__pendingPeer.requests.filter(request => request.url.includes('/v1/ratings')).length);
-  await page.locator('.movie-list li').filter({ has: page.getByText('Movie 8', { exact: true }) }).getByRole('button').click();
-  await page.getByRole('button', { name: '2 stars', exact: true }).click();
-  await page.locator('#save-rating').click();
+  const submitCountBeforeFailure = await page.evaluate(() => {
+    const count = window.__pendingPeer.requests.filter(request => request.url.includes('/v1/ratings')).length;
+    window.__pendingPeer.sockets.at(-1).close();
+    const row = [...document.querySelectorAll('.movie-list li')]
+      .find(item => item.querySelector('strong').textContent === 'Movie 8');
+    row.querySelector('button').click();
+    document.querySelector('[aria-label="2 stars"]').click();
+    document.querySelector('#save-rating').click();
+    return count;
+  });
   await page.waitForFunction(count => window.__pendingPeer.requests.filter(request => request.url.includes('/v1/ratings')).length > count, submitCountBeforeFailure);
   const failedSubmit = await page.evaluate(() => window.__pendingPeer.requests.map((request, index) => ({ request, index }))
     .filter(entry => entry.request.url.includes('/v1/ratings')).at(-1).index);

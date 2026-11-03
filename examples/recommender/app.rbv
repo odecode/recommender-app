@@ -783,9 +783,16 @@ txn next_movie_page [authenticated && movie_page+1 < movie_page_count][movie_pag
 
 txn select_movie(item_id: Int) [item_id >= 0 && item_id < 1682][selected_movie_id == item_id] {
     selected_movie_id = item_id;
-    selected_movie_title = client_movie_title(item_id);
-    let visible: List<ProfileRating> = browser_profile_overlay(server_ratings,browser_operations);
-    client_refresh_catalogue_page(visible);
+    // 2026-11-01: Selection uses the visible page; filtering and rating overlays
+    // belong to catalogue/profile changes. Revisit if selection can originate off-page.
+    let cards: List<MovieCard> = [];
+    foreach idx in 0..movie_cards .^Length {
+        let card: MovieCard = movie_cards[idx];
+        when card.item_id == item_id { selected_movie_title = card.title; };
+        cards <- MovieCard { item_id: card.item_id, title: card.title,
+            rating: card.rating, selected: card.item_id == item_id };
+    };
+    movie_cards = cards;
     notice = "Selected "+selected_movie_title+".";
     term;
 };
@@ -914,7 +921,10 @@ txn discard_failed_save [authenticated][failed_operation_id .^Length > 0] {
 txn check_save_status [authenticated][uncertain_operation_id .^Length > 0] {
     client_start_reconciliation(); term;
 };
-txn leave_with_pending_saves [authenticated][logout_confirmation] { client_logout_now(); term; };
+// 2026-11-01: confirmation authorizes logout; the completed transition is
+// signed-out state, not the confirmation flag cleared by client_logout_now.
+// Keep this post aligned with the logout action if that action changes.
+txn leave_with_pending_saves [authenticated && logout_confirmation][!authenticated] { client_logout_now(); term; };
 
 <view>
   <main class="shell" b-window:recommender_http="http_event">
@@ -934,7 +944,7 @@ txn leave_with_pending_saves [authenticated][logout_confirmation] { client_logou
           <span class="connection"><span class="connection-dot"></span><span id="connection" b-text="connection">Connecting</span></span></div>
         <label for="movie-search">Browse all films or search by title</label>
         <input id="movie-search" type="search" placeholder="Try a title, like Toy Story" autocomplete="off"
-          b-bind:value="movie_search" b-trigger:input="search_changed">
+          b-bind:value="movie_search">
         <p id="catalogue-loading" class="muted" b-show="catalogue_loading">Loading the movie catalogue…</p>
         <ul class="movie-list" aria-label="Available movies">
           <li b-each:item="movie_cards" b-key="item.item_id">
