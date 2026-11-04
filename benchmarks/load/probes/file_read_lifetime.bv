@@ -2,14 +2,27 @@
 import { read_file } from "std/os/fs.bv";
 import { is_err, unwrap } from "std/result.bv";
 
+defn probe_path(mode: Int) -> String {
+    when mode == 1 { term "target/load-memory/growth-input"; };
+    when mode == 2 { term "target/load-memory/growth-input/missing"; };
+    when mode == 3 { term "/proc/self"; };
+    term "/proc/self/stat";
+};
+
 let done: Bool = false;
 node main [!done][done] {
     let reads: Int = get_env_int!("READS");
     when reads < 1 { endprogram 64; };
+    let mode: Int = get_env_int!("READ_MODE");
     foreach index in 0..reads {
-        let content: Result<String,Int> = read_file("/proc/self/stat");
-        when is_err(content) { endprogram 1; };
-        when unwrap(content) .^Length < 1 { endprogram 2; };
+        let content: Result<String,Int> = read_file(probe_path(mode));
+        when mode >= 2 {
+            when !is_err(content) { endprogram 3; };
+        };
+        when mode < 2 {
+            when is_err(content) { endprogram 1; };
+            when unwrap(content) .^Length < 1 { endprogram 2; };
+        };
     };
     println!("file_reads_ok");
     done = true;

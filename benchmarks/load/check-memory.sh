@@ -14,6 +14,8 @@ for source in benchmarks/load/probes/file_read_lifetime.bv benchmarks/load/colle
         --config-dir "$compiler_root/config" --out "$output" > "$output/$name.build.log" 2>&1
 done
 
+# Cross the initial 4096-byte buffer and two growth boundaries.
+head -c 20000 /dev/zero > "$output/growth-input"
 failed=0
 memory_check() {
     local label="$1" status=0
@@ -29,9 +31,12 @@ memory_check() {
     fi
 }
 
-for reads in 1 20; do
-    READS="$reads" memory_check "file-$reads" "$output/file_read_lifetime"
-    grep -Fxq file_reads_ok "$output/file-$reads.stdout" || failed=1
+for mode in 0 1 2 3; do
+    for reads in 1 20; do
+        label="file-$mode-$reads"
+        READ_MODE="$mode" READS="$reads" memory_check "$label" "$output/file_read_lifetime"
+        grep -Fxq file_reads_ok "$output/$label.stdout" || failed=1
+    done
 done
 LOAD_PID=0 LOAD_HZ=100 LOAD_SAMPLES=20 memory_check collector "$output/collect"
 awk -F, 'NF != 19 || (NR > 1 && $1 != "sample") { exit 1 } END { if (NR != 21) exit 1 }' \
