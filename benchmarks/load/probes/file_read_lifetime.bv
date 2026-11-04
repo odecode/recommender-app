@@ -1,0 +1,17 @@
+// Isolate the file result and its string payload from parsing and CSV output.
+import { read_file } from "std/os/fs.bv";
+import { is_err, unwrap } from "std/result.bv";
+
+let done: Bool = false;
+node main [!done][done] {
+    let reads: Int = get_env_int!("READS");
+    when reads < 1 { endprogram 64; };
+    foreach index in 0..reads {
+        let content: Result<String,Int> = read_file("/proc/self/stat");
+        when is_err(content) { endprogram 1; };
+        when unwrap(content) .^Length < 1 { endprogram 2; };
+    };
+    println!("file_reads_ok");
+    done = true;
+    endprogram;
+};

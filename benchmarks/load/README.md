@@ -80,3 +80,11 @@ LOAD_PID=12345 LOAD_HZ=1 LOAD_SAMPLES=10 target/load-tests/collect > process.csv
 Do not use the current collector for endurance conclusions: its 5,000-sample
 self-preflight showed growing retained memory. The workstream is fixing the
 underlying lifetime handling before running sustained backend campaigns.
+
+Run `bash benchmarks/load/check-memory.sh` with the same compiler environment
+as `check.sh` and Valgrind on PATH. It rebuilds the programs, checks one and
+twenty independent file reads, and checks a twenty-sample collector run. A
+memory error or definite/indirect loss fails the check. The reports and raw
+output are in `target/load-memory`. The isolated probe distinguishes file
+result ownership from collector scheduling, parsing and formatting. This check
+currently fails on file-result ownership.
