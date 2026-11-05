@@ -1,0 +1,116 @@
+import "./http_attempt.bv";
+import "./schedule.bv";
+
+obj LoadConfig { port: Int; rate: Int; count: Int; slots: Int; timeout: Int; items: Int; };
+obj HttpLoad {
+    config: LoadConfig; schedule: ArrivalSchedule; metrics: OperationMetrics;
+    slots: List<HttpAttempt>; polls: PollSet; request: ByteBuf; last_due: Int;
+};
+
+defn load_config() -> LoadConfig {
+    let port: Int = get_env_int!("LOAD_PORT");
+    let rate: Int = get_env_int!("LOAD_HZ");
+    let count: Int = get_env_int!("LOAD_REQUESTS");
+    let slots: Int = get_env_int!("LOAD_SLOTS");
+    let timeout: Int = get_env_int!("LOAD_TIMEOUT_MS");
+    let items: Int = get_env_int!("LOAD_ITEMS");
+    when port < 1 || port > 65535 || rate < 1 || rate > 10000 || count < 1 || count > 1000000 ||
+        slots < 1 || slots > 256 || timeout < 1 || timeout > 60000 || items < 1 || items > 10000 { trap; };
+    term LoadConfig { port: port, rate: rate, count: count, slots: slots, timeout: timeout*1000000, items: items };
+};
+
+defn load_new(config: LoadConfig) -> HttpLoad {
+    let slots: List<HttpAttempt> = [];
+    foreach index in 0..config.slots { slots <- http_attempt_new(); };
+    let polls: PollSet = unwrap(poll_new(config.slots));
+    let metrics: OperationMetrics = operation_metrics(1,1000000,60001);
+    let request: ByteBuf = catalogue_request();
+    let schedule: ArrivalSchedule = arrival_schedule(now_ns(),config.rate);
+    term HttpLoad { config: config, schedule: schedule, metrics: metrics,
+        slots: slots, polls: polls, request: request, last_due: arrival_due_ns(schedule,config.count-1) };
+};
+
+defn load_admit(load: HttpLoad) -> Int {
+    when load.schedule.offered == load.config.count { term 0; };
+    let now: Int = now_ns();
+    when now > load.last_due { now = load.last_due; };
+    let batch: ArrivalBatch = arrival_poll(load.schedule,now,load.config.slots-load.metrics.inflight);
+    let admitted: Int = 0;
+    foreach index in 0..load.config.slots {
+        let slot: HttpAttempt = load.slots[index];
+        when admitted < batch.count && !slot.attempt.active {
+            let scheduled: Int = arrival_due_ns(load.schedule,batch.first+admitted);
+            http_attempt_start(slot,load.metrics,scheduled,load.config.port,load.config.timeout);
+            admitted += 1;
+        };
+    };
+    when admitted != batch.count { trap; };
+    term 0;
+};
+
+defn load_poll(load: HttpLoad) -> Int {
+    let now: Int = now_ns();
+    let wake: Int = now+1000000000;
+    when load.schedule.offered < load.config.count { wake = arrival_due_ns(load.schedule,load.schedule.offered); };
+    foreach index in 0..load.config.slots {
+        let slot: HttpAttempt = load.slots[index];
+        let fd: Int = -1; let events: Int = POLL_OUT;
+        when slot.attempt.active { fd = slot.socket.fd; when slot.deadline < wake { wake = slot.deadline; }; };
+        when slot.state == 3 { events = POLL_IN; };
+        poll_set(load.polls,index,fd,events);
+    };
+    let wait: Int = 0;
+    when wake > now { wait = (wake-now)/1000000+((wake-now)%1000000 != 0) as Int; };
+    let ready: Int = poll_wait(load.polls,wait);
+    when ready < 0 && ready != -4 { term ready; };
+    foreach index in 0..load.config.slots {
+        http_attempt_progress(load.slots[index],load.metrics,load.request,poll_events(load.polls,index),load.config.items);
+    };
+    term 0;
+};
+
+defn load_run(load: HttpLoad) -> Int {
+    load_admit(load);
+    when load.schedule.offered == load.config.count && load.metrics.inflight == 0 { term 0; };
+    let ready: Int = load_poll(load);
+    when ready < 0 { term ready; };
+    term load_run(load);
+};
+
+defn load_histogram(name: String, histogram: Histogram) -> Void {
+    let p50: Int = -1; let p95: Int = -1; let p99: Int = -1;
+    when histogram.count > 0 {
+        p50 = histogram_quantile(histogram,500); p95 = histogram_quantile(histogram,950); p99 = histogram_quantile(histogram,990);
+    };
+    println!("latency,{},{},{},{},{},{},{},{}",name,histogram.count,histogram.width,histogram.overflow,histogram.maximum,p50,p95,p99);
+};
+
+defn load_report(load: HttpLoad, elapsed: Int) -> Void {
+    let metrics: OperationMetrics = load.metrics;
+    when load.schedule.offered != metrics.started+load.schedule.missed || metrics.started != metrics.finished ||
+        metrics.finished != metrics.succeeded+metrics.application_errors+metrics.transport_errors+metrics.timed_out+metrics.validation_errors { trap; };
+    println!("summary,offered,missed,started,finished,ok,application,transport,timeout,validation,elapsed_ns");
+    println!("summary,{},{},{},{},{},{},{},{},{},{}",load.schedule.offered,load.schedule.missed,metrics.started,metrics.finished,
+        metrics.succeeded,metrics.application_errors,metrics.transport_errors,metrics.timed_out,metrics.validation_errors,elapsed);
+    println!("latency,name,count,width_ns,overflow,max_ns,p50_upper_ns,p95_upper_ns,p99_upper_ns");
+    load_histogram("total",metrics.total_latency); load_histogram("service",metrics.service_latency);
+    load_histogram("lag",metrics.scheduling_lag);
+    load_histogram("ok",metrics.ok_latency.total); load_histogram("application",metrics.application_latency.total);
+    load_histogram("transport",metrics.transport_latency.total); load_histogram("timeout",metrics.timeout_latency.total);
+    load_histogram("validation",metrics.validation_latency.total);
+};
+
+let done: Bool = false;
+node main [!done][done] {
+    let load: HttpLoad = load_new(load_config());
+    println!("config,port,hz,requests,slots,timeout_ns,items,header_limit,body_limit");
+    println!("config,{},{},{},{},{},{},4096,262144",load.config.port,load.config.rate,load.config.count,load.config.slots,load.config.timeout,load.config.items);
+    let result: Int = load_run(load);
+    when result < 0 { println!("fatal,poll,{}",result); endprogram 70; };
+    load_report(load,now_ns()-load.schedule.start_ns);
+    foreach index in 0..load.config.slots { buf_free(load.slots[index].response); };
+    poll_free(load.polls); buf_free(load.request);
+    done = true;
+    when load.metrics.succeeded != load.config.count { endprogram 2; };
+    endprogram;
+};

@@ -1,0 +1,57 @@
+import "std/json.bv";
+
+// Independent response contract: exactly one movies array, ordered contiguous
+// IDs and nonempty titles. Duplicate required keys are invalid.
+defn catalogue_item(value: JsonValue, expected: Int) -> Bool {
+    match value {
+        Object(pairs) => {
+            let ids: Int = 0; let titles: Int = 0;
+            foreach index in 0..pairs.Count#() {
+                let pair = pairs[index];
+                when pair.0 == "item_id" {
+                    ids += 1;
+                    match pair.1 { IntVal(number) => { when number != expected { term false; }; }, _ => { term false; } }
+                };
+                when pair.0 == "title" {
+                    titles += 1;
+                    match pair.1 { StrVal(title) => { when title .^Length == 0 { term false; }; }, _ => { term false; } }
+                };
+            };
+            term ids == 1 && titles == 1;
+        },
+        _ => false,
+    }
+};
+
+defn catalogue_array(value: JsonValue, expected: Int) -> Bool {
+    match value {
+        Array(items) => {
+            when items.Count#() != expected { term false; };
+            foreach index in 0..expected { when !catalogue_item(items[index],index) { term false; }; };
+            term true;
+        },
+        _ => false,
+    }
+};
+
+defn catalogue_object(value: JsonValue, expected: Int) -> Bool {
+    match value {
+        Object(pairs) => {
+            let found: Int = 0;
+            foreach index in 0..pairs.Count#() {
+                let pair = pairs[index];
+                when pair.0 == "movies" {
+                    found += 1;
+                    when !catalogue_array(pair.1,expected) { term false; };
+                };
+            };
+            term found == 1;
+        },
+        _ => false,
+    }
+};
+
+defn catalogue_valid(text: String, expected: Int) -> Bool {
+    when expected < 1 { term false; };
+    match json_parse(text) { Ok(value) => catalogue_object(value,expected), Err(_) => false }
+};

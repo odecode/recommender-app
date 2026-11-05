@@ -1,0 +1,11 @@
+import "../catalogue.bv";
+let done: Bool = false;
+node main [!done][done] {
+    when !catalogue_valid("{\"movies\":[{\"item_id\":0,\"title\":\"One\"},{\"title\":\"Two\",\"item_id\":1}]}",2) { endprogram 1; };
+    when catalogue_valid("{\"movies\":[{\"item_id\":1,\"title\":\"One\"}]}",1) { endprogram 2; };
+    when catalogue_valid("{\"movies\":[{\"item_id\":0,\"title\":\"\"}]}",1) { endprogram 3; };
+    when catalogue_valid("{\"movies\":[{\"item_id\":0,\"item_id\":0,\"title\":\"One\"}]}",1) { endprogram 4; };
+    when catalogue_valid("{\"movies\":[],\"movies\":[]}",1) { endprogram 5; };
+    when catalogue_valid("{\"movies\":[{\"item_id\":0,\"title\":\"One\"}]}garbage",1) { endprogram 6; };
+    println!("catalogue_validation_ok"); done = true; endprogram;
+};

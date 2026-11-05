@@ -1,0 +1,63 @@
+import "std/net/nonblocking.bv";
+import "std/os/poll.bv";
+import "std/os/time.bv";
+
+defn peer_bytes(text: String) -> ByteBuf {
+    let buffer: ByteBuf = buf_new(text .^Length);
+    foreach index in 0..text .^Length { Store#(buffer.ptr+index,text[index],1); };
+    buffer.len = text .^Length; term buffer;
+};
+
+defn peer_reply(mode: Int) -> String {
+    let body: String = "{\"movies\":[{\"item_id\":0,\"title\":\"One\"}]}";
+    when mode == 5 { body = "{\"movies\":[{\"item_id\":9,\"title\":\"One\"}]}"; };
+    when mode == 2 { term "HTTP/1.1 200 OK\r\nContent-Length: 99\r\n\r\nshort"; };
+    when mode == 3 { term "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nContent-Length: 0\r\n\r\n"; };
+    when mode == 4 { term "HTTP/1.1 503 Unavailable\r\nContent-Length: 0\r\n\r\n"; };
+    term "HTTP/1.1 200 OK\r\nContent-Length: "+body .^Length as String+"\r\n\r\n"+body;
+};
+
+defn peer_serve(socket: Socket, mode: Int) -> Int {
+    let polls: PollSet = unwrap(poll_new(1));
+    poll_set(polls,0,socket.fd,POLL_IN);
+    when poll_wait(polls,2000) <= 0 { poll_free(polls); term -1; };
+    let request: ByteBuf = buf_new(4096);
+    let received: Int = sock_recv_once(socket,request,4096);
+    buf_free(request);
+    when received <= 0 { poll_free(polls); term -1; };
+    when mode == 6 { sleep_ms(500); poll_free(polls); term 0; };
+    let response: ByteBuf = peer_bytes(peer_reply(mode));
+    let offset: Int = 0;
+    foreach turn in 0..1000 {
+        when offset < response.len {
+            poll_set(polls,0,socket.fd,POLL_OUT);
+            when poll_wait(polls,100) <= 0 { buf_free(response); poll_free(polls); term -1; };
+            let count: Int = response.len-offset;
+            when mode == 1 { count = 1; };
+            let sent: Int = sock_send_once(socket,response,offset,count);
+            when sent < 0 && sent != -11 && sent != -4 { buf_free(response); poll_free(polls); term -1; };
+            when sent > 0 { offset += sent; };
+            when mode == 1 { sleep_ms(1); };
+        };
+    };
+    let valid: Bool = offset == response.len;
+    buf_free(response); poll_free(polls); term valid as Int;
+};
+
+let done: Bool = false;
+node main [!done][done] {
+    let listener: Socket = sock_tcp_nonblocking();
+    when listener.fd < 0 || sock_bind_listen(listener,get_env_int!("LOAD_PORT"),64) < 0 { endprogram 1; };
+    let polls: PollSet = unwrap(poll_new(1));
+    poll_set(polls,0,listener.fd,POLL_IN);
+    println!("peer_ready"); stdout_flush();
+    foreach index in 0..get_env_int!("PEER_COUNT") {
+        when poll_wait(polls,5000) <= 0 { endprogram 2; };
+        let socket: Socket = sock_accept(listener);
+        when socket.fd < 0 { endprogram 3; };
+        let served: Int = peer_serve(socket,get_env_int!("PEER_MODE"));
+        sock_close(socket);
+        when served < 0 { endprogram 4; };
+    };
+    poll_free(polls); sock_close(listener); done = true; endprogram;
+};

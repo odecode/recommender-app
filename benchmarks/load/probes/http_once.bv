@@ -1,0 +1,23 @@
+import "../http_attempt.bv";
+let done: Bool = false;
+node main [!done][done] {
+    let slot: HttpAttempt = http_attempt_new();
+    let metrics: OperationMetrics = operation_metrics(1,1000000,1000);
+    let request: ByteBuf = catalogue_request();
+    let polls: PollSet = unwrap(poll_new(1));
+    http_attempt_start(slot,metrics,now_ns(),get_env_int!("LOAD_PORT"),200000000);
+    foreach turn in 0..1000 {
+        when slot.attempt.active {
+            let events: Int = POLL_OUT;
+            when slot.state == 3 { events = POLL_IN; };
+            poll_set(polls,0,slot.socket.fd,events);
+            let ready: Int = poll_wait(polls,10);
+            when ready < 0 && ready != -4 { trap; };
+            http_attempt_progress(slot,metrics,request,poll_events(polls,0),1);
+        };
+    };
+    when slot.attempt.active || metrics.finished != 1 { trap; };
+    println!("outcomes,{},{},{},{},{}",metrics.succeeded,metrics.application_errors,metrics.transport_errors,metrics.timed_out,metrics.validation_errors);
+    poll_free(polls); buf_free(request); buf_free(slot.response);
+    done = true; endprogram;
+};
