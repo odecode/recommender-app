@@ -1,0 +1,77 @@
+import "std/net/nonblocking.bv";
+import "std/os/poll.bv";
+
+// 2026-11-05: controlled Linux stream peers isolate transport progress from
+// application framing. Keep this gate when TCP/HTTP journeys are added.
+defn stream_pair() -> (Socket,Socket) {
+    let storage: Int = Malloc#(8) as Int;
+    when storage == 0 { trap; };
+    let result: Int = SysCall#(53, 1, 1 | 2048 | 524288, 0, storage);
+    when result < 0 { Free#(storage as Ptr); trap; };
+    let left: Int = Load#(storage,4);
+    let right: Int = Load#(storage+4,4);
+    Free#(storage as Ptr);
+    term (Socket { fd: left }, Socket { fd: right });
+};
+
+defn split_and_eof() -> Void {
+    let (sender,receiver) = stream_pair();
+    let outgoing: ByteBuf = buf_new(4).put_u8(65).put_u8(0).put_u8(255).put_u8(90);
+    let incoming: ByteBuf = buf_new(4);
+    let ready: Result<PollSet,Int> = poll_new(1);
+    when is_err(ready) { trap; };
+    let polls: PollSet = unwrap(ready);
+    poll_set(polls,0,receiver.fd,POLL_IN);
+    when poll_wait(polls,0) != 0 { trap; };
+    when sock_recv_once(receiver,incoming,4) != -11 || incoming.len != 0 { trap; };
+    when sock_send_once(sender,outgoing,0,2) != 2 { trap; };
+    when poll_wait(polls,1000) != 1 || (poll_events(polls,0) & POLL_IN) == 0 { trap; };
+    when sock_recv_once(receiver,incoming,1) != 1 || incoming.len != 1 { trap; };
+    when sock_recv_once(receiver,incoming,3) != 1 || incoming.len != 2 { trap; };
+    when sock_recv_once(receiver,incoming,2) != -11 || incoming.len != 2 { trap; };
+    when sock_send_once(sender,outgoing,2,2) != 2 { trap; };
+    when sock_close(sender) != 0 { trap; };
+    // A hangup may accompany readable bytes: drain data before accepting EOF.
+    when poll_wait(polls,1000) != 1 { trap; };
+    when sock_recv_once(receiver,incoming,2) != 2 || incoming.len != 4 { trap; };
+    foreach index in 0..4 {
+        when Load#(incoming.ptr+index,1) != Load#(outgoing.ptr+index,1) { trap; };
+    };
+    incoming.len = 0;
+    when sock_recv_once(receiver,incoming,4) != 0 || incoming.len != 0 { trap; };
+    when sock_send_once(receiver,outgoing,0,1) != -32 { trap; };
+    when sock_close(receiver) != 0 { trap; };
+    poll_free(polls);
+    Free#(incoming.ptr as Ptr);
+    Free#(outgoing.ptr as Ptr);
+};
+
+defn bounded_backpressure() -> Void {
+    let (sender,receiver) = stream_pair();
+    let outgoing: ByteBuf = buf_new(4096);
+    foreach index in 0..4096 { outgoing = outgoing.put_u8(index & 255); };
+    let blocked: Bool = false;
+    let sent: Int = 0;
+    foreach attempt in 0..4096 {
+        when !blocked {
+            let count: Int = sock_send_once(sender,outgoing,0,4096);
+            when count == -11 { blocked = true; };
+            when count != -11 {
+                when count <= 0 || count > 4096 { trap; };
+                sent += count;
+            };
+        };
+    };
+    when !blocked || sent == 0 || outgoing.len != 4096 { trap; };
+    when sock_close(receiver) != 0 || sock_close(sender) != 0 { trap; };
+    Free#(outgoing.ptr as Ptr);
+};
+
+let done: Bool = false;
+node main [!done][done] {
+    split_and_eof();
+    bounded_backpressure();
+    println!("controlled_stream_progress_ok");
+    done = true;
+    endprogram;
+};
