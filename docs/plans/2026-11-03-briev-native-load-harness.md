@@ -148,3 +148,60 @@ pass. Attempt gates cover overlapping/out-of-order completions, slot reuse, all
 five outcomes, per-outcome latency distributions, pending denominators and 11
 invalid lifecycle/timestamp/overflow cases. The 5,000-sample memory preflight
 remains a failed readiness gate; no endurance or backend capacity claim follows.
+
+## 2026-11-04 — collector memory closure
+
+The compiler now derives nonescaping allocation regions and reclaims actual
+allocations at proved call boundaries. Container images and active payloads are
+tracked independently of caller destinations and borrowed/static values. The
+collector source contains no manual-free workaround. Native safety fixtures
+cover late-used/returned aliases, borrowed heap/static strings, nested enums,
+caller-retained fields, recursion and early exits. Allocator bookkeeping also
+covers explicit free across suspended scopes, realloc and allocation failure.
+
+All nine `benchmarks/load/check-memory.sh` cases pass with zero definite/indirect
+loss and zero Valgrind errors. Only the process-lifetime 65,536-byte stdout buffer
+remains reachable. The full `benchmarks/load/check.sh` functional gate passes,
+including schema, units, ordered timestamps, missing-process errors, scheduling
+and attempt accounting. Prior failed-read and memory observations above remain
+historical evidence; this checkpoint supersedes their readiness verdict.
+
+Two self-preflights each emitted 5,000 successful, 19-column rows at 500 Hz.
+Run 1 RSS was 337→369 pages and stayed at 369 after row 1,000; run 2 was 335→335
+and stayed at 335. Virtual memory stayed at 3,989,504 bytes after row 1,000 in
+both runs (4,096-byte pages, 100 clock ticks/second). These are bounded-memory
+results, not throughput or backend-capacity results. Raw CSV and summary:
+`target/load-memory/preflight-5000-{1,2}.csv`, `preflight-summary.json`.
+
+Compiler SHA-256: `f5ba791191c856209da10038260565438ade299ef68317f5165fba97316f9ebe`;
+collector SHA-256: `546751f383480194bf2635f932bf335f136754b57b07b666509529fdbb4e0cec`.
+Compiler design/validation record:
+`C:/Users/wotto/code/briev-lang/docs/plans/2026-11-04-collector-reclamation-closure.md`.
+Continue with incremental client transport and one verified real user journey;
+worker discovery, PSS and sustained backend campaigns remain ahead.
+
+Final compiler verification checkpoint (same day): entry scopes now reject
+unclassified global initialization and include reactor-condition effects.
+Wasm allocator/store width gates also drove general representation fixes.
+The final native build again passes all nine Valgrind cases with zero loss or
+errors. Both repeated 5,000-row runs remain flat after warmup: run 1 RSS
+323→355 pages (355 constant after row 1,000), run 2 346→378 (378 constant).
+Virtual memory is 3,989,504 bytes after warmup in both. CSV identity, sample
+indices, errors, 19-column schema, units and ordered times were checked.
+Raw final files replace the generated preflight artifacts named above.
+
+Final compiler SHA-256:
+`5a1025d902a5ba719ef74ad502a6be0c5b1c20411867660763657aa14279dffe`.
+Final collector SHA-256:
+`285f48f0c08b327b499bacd0ee7027300e3992db856da8f7fbbeaeda375eb37a`.
+Wasm collection/JSON and object-layout gates and native allocation/alias
+regressions pass. Kani cannot start on the executor's older glibc; no formal
+verification claim is made. Compiler library/determinism results are recorded
+in the compiler closure plan. Backend capacity and endurance remain unmeasured.
+
+Final compiler build after regression corrections:
+`d2582dd65100673fd48f4f6c976a7e6dfb7668356b939a444fac162f522875ff`.
+It emits the same collector hash recorded in the final checkpoint. Library
+verification passes 3,459 tests with only the delegated source sweep excluded;
+native and both wasm integrations pass. Full IR determinism passes seven
+programs. The collector memory blocker is closed in the working checkout.

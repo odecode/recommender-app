@@ -1,8 +1,8 @@
 # Load harness
 
 Work in progress. The arrival scheduler and process sampling primitives are
-implemented, along with an initial streaming process collector. Its memory
-preflight found compiler/stdlib lifetime leaks, so it is not ready for a soak.
+implemented, along with a streaming process collector. Its compiler lifetime
+repair passes the memory gate and repeated 5,000-sample self-preflights.
 Network users, reports and the campaign controller are not yet implemented.
 There are no capacity or endurance measurements yet.
 
@@ -77,9 +77,10 @@ For a short diagnostic run after that check has built it:
 LOAD_PID=12345 LOAD_HZ=1 LOAD_SAMPLES=10 target/load-tests/collect > process.csv
 ```
 
-Do not use the current collector for endurance conclusions: its 5,000-sample
-self-preflight showed growing retained memory. The workstream is fixing the
-underlying lifetime handling before running sustained backend campaigns.
+The repaired compiler passes two 5,000-sample self-preflights at 500 Hz with
+flat RSS and virtual memory after warmup. Use the matching compiler checkout;
+older compilers retained file results, parser storage and observations. This
+checks collector memory stability; sustained backend campaigns remain ahead.
 
 Run `bash benchmarks/load/check-memory.sh` with the same compiler environment
 as `check.sh` and Valgrind on PATH. It rebuilds the programs, checks one and
@@ -87,4 +88,5 @@ twenty independent file reads, and checks a twenty-sample collector run. A
 memory error or definite/indirect loss fails the check. The reports and raw
 output are in `target/load-memory`. The isolated probe distinguishes file
 result ownership from collector scheduling, parsing and formatting. This check
-currently fails on file-result ownership.
+passes all nine cases with the repaired compiler. See
+`docs/plans/2026-11-03-briev-native-load-harness.md` for the dated evidence.
