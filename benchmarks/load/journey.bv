@@ -1,0 +1,97 @@
+import "./journey_wire.bv";
+import "./journey_oracle.bv";
+import "./catalogue.bv";
+import "std/env.bv";
+
+defn journey_empty_ratings(value: JsonValue) -> Bool {
+    match value { Array(rows) => rows.Count#() == 0, _ => false, }
+};
+defn journey_initial(value: JsonValue, expected: JourneyExpectation, username: String) -> Bool {
+    let profile: JsonValue = journey_member(value,"profile");
+    term journey_envelope(value,"state") && journey_identity(profile,expected) &&
+        journey_text(journey_member(value,"username")) == username &&
+        journey_text(journey_member(value,"model_generation")) .^Length > 0 &&
+        journey_empty_ratings(journey_member(value,"ratings"));
+};
+defn journey_operation(wire: JourneyWire, expected: JourneyExpectation) -> Bool {
+    let command: String = "{\"v\":1,\"server_epoch\":\""+expected.epoch+"\",\"operation_id\":\""+expected.operation+
+        "\",\"item_id\":"+expected.item as String+",\"rating\":"+expected.rating as String+"}";
+    let started: Int = now_ns(); wire.deadline = started+30000000000;
+    when !journey_ws_send(wire,WS_OP_TEXT,command) { term false; };
+    let stages: JourneyStages = JourneyStages { accepted: false, saved: false, predicted: false, failed: false };
+    let accepted_ns: Int = -1; let saved_ns: Int = -1; let predicted_ns: Int = -1;
+    foreach event_index in 0..1000 {
+        let event: String = journey_ws_next(wire);
+        when wire.error .^Length > 0 { term false; };
+        let result: Int = journey_event(event,expected,stages);
+        when result < 0 { wire.error = "event-validation"; term false; };
+        let elapsed: Int = now_ns()-started;
+        when stages.accepted && accepted_ns < 0 { accepted_ns = elapsed; };
+        when stages.saved && saved_ns < 0 { saved_ns = elapsed; };
+        when stages.predicted && predicted_ns < 0 { predicted_ns = elapsed; };
+        when now_ns() >= wire.deadline { wire.error = "timeout"; term false; };
+        when journey_complete(stages) {
+            println!("operation,{},{},{},{},{},{},{},{},{}",expected.account,expected.epoch,expected.operation,
+                expected.revision,expected.generation,accepted_ns,saved_ns,predicted_ns,elapsed);
+            term true;
+        };
+    };
+    wire.error = "event-limit"; term false;
+};
+defn journey_run(port: Int, username: String, password: String) -> Bool {
+    let credentials: String = "{\"username\":\""+username+"\",\"password\":\""+password+"\"}";
+    let registration: String = journey_http(port,"POST","/register",credentials);
+    let registered: JsonValue = journey_document(registration);
+    when !journey_envelope(registered,"registered") { println!("failed,register"); term false; };
+    let login: JsonValue = journey_document(journey_http(port,"POST","/login",credentials));
+    let token: String = journey_text(journey_member(login,"token"));
+    let epoch: String = journey_text(journey_member(login,"server_epoch"));
+    let account: Int = journey_int(journey_member(login,"account_id"));
+    when !journey_envelope(login,"authenticated") || !journey_hex(token,32) || !journey_hex(epoch,32) || account <= 0 ||
+        journey_text(journey_member(login,"username")) != username { println!("failed,login"); term false; };
+    let expected: JourneyExpectation = JourneyExpectation { epoch: epoch, account: account, revision: "0", generation: "",
+        operation: "", item: 0, rating: 5, rated_count: 0, items: 1682 };
+    let state_text: String = journey_http(port,"GET","/state?token="+token,"");
+    let state: JsonValue = journey_document(state_text);
+    when !journey_initial(state,expected,username) { println!("failed,hydrate"); term false; };
+    // Hydration currently advertises the opaque snapshot identity under this
+    // field name, while worker events use a numeric generation. Pin the worker
+    // expectation explicitly; never infer freshness from the event under test.
+    println!("snapshot_identity,{}",journey_text(journey_member(state,"model_generation")));
+    expected.generation = get_env("LOAD_GENERATION");
+    when !catalogue_valid(journey_http(port,"GET","/movies",""),1682) { println!("failed,catalogue"); term false; };
+    let wire: JourneyWire = journey_wire(port,30000000000);
+    let success: Bool = journey_upgrade(wire,token);
+    foreach item in 0..5 {
+        when success {
+            expected.item = item; expected.rated_count = item+1; expected.revision = (item+1) as String;
+            expected.operation = epoch+"0000000000000000000000000000000"+(item+1) as String;
+            success = journey_operation(wire,expected);
+        };
+    };
+    when !success { println!("failed,live,{}",wire.error); };
+    journey_close(wire);
+    let logged_out: JsonValue = journey_document(journey_http(port,"POST","/logout?token="+token,""));
+    when !journey_envelope(logged_out,"logged-out") { println!("failed,logout"); term false; };
+    when success { println!("journey_ok,{},{}",account,username); };
+    term success;
+};
+defn journey_safe_credential(text: String) -> Bool {
+    when text .^Length < 8 || text .^Length > 64 { term false; };
+    foreach index in 0..text .^Length {
+        let byte: Int = byte_at(text,index);
+        when !((byte >= 97 && byte <= 122) || (byte >= 48 && byte <= 57) || byte == 45 || byte == 95) { term false; };
+    };
+    term true;
+};
+let done: Bool = false;
+node main [!done][done] {
+    let port: Int = get_env_int!("LOAD_PORT");
+    let username: String = get_env("LOAD_USERNAME"); let password: String = get_env("LOAD_PASSWORD");
+    when port < 1 || port > 65535 || !journey_safe_credential(username) || !journey_safe_credential(password) || !journey_positive(get_env("LOAD_GENERATION")) {
+        println!("Set LOAD_PORT 1..65535, a positive LOAD_GENERATION, and unique LOAD_USERNAME/LOAD_PASSWORD using 8..64 lowercase letters, digits, underscores or hyphens."); endprogram 64;
+    };
+    println!("operation,account,epoch,operation_id,revision,model_generation,accepted_ns,saved_ns,predicted_ns,complete_ns");
+    let success: Bool = journey_run(port,username,password);
+    done = true; when !success { endprogram 2; }; endprogram;
+};

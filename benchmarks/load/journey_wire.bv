@@ -1,0 +1,139 @@
+import "std/net/nonblocking.bv";
+import "std/net/http_response.bv";
+import "std/net/http.bv";
+import "std/net/websocket.bv";
+import "std/os/poll.bv";
+import "std/os/time.bv";
+
+obj JourneyWire { socket: Socket; polls: PollSet; bytes: ByteBuf; deadline: Int; error: String; };
+defn journey_wire(port: Int, timeout: Int) -> JourneyWire {
+    let wire: JourneyWire = JourneyWire { socket: sock_tcp_nonblocking(), polls: unwrap(poll_new(1)),
+        bytes: buf_new(266240), deadline: now_ns()+timeout, error: "" };
+    when wire.socket.fd < 0 { wire.error = "socket"; term wire; };
+    let connected: Int = sock_connect(wire.socket,ip_v4(127,0,0,1),port);
+    when connected != 0 && connected != -115 && connected != -4 { wire.error = "connect"; term wire; };
+    when !journey_ready(wire,POLL_OUT) { term wire; };
+    when sock_pending_error(wire.socket) != 0 { wire.error = "connect"; };
+    term wire;
+};
+defn journey_ready(wire: JourneyWire, events: Int) -> Bool {
+    when wire.error .^Length > 0 { term false; };
+    foreach turn in 0..1000000 {
+        when now_ns() >= wire.deadline { wire.error = "timeout"; term false; };
+        poll_set(wire.polls,0,wire.socket.fd,events);
+        let ready: Int = poll_wait(wire.polls,10);
+        when ready < 0 && ready != -4 { wire.error = "poll"; term false; };
+        when ready > 0 { term true; };
+    };
+    wire.error = "iteration-limit"; term false;
+};
+defn journey_close(wire: JourneyWire) -> Void {
+    when wire.socket.fd >= 0 { let closed: Int = sock_close(wire.socket); wire.socket.fd = -1; };
+    poll_free(wire.polls); buf_free(wire.bytes);
+};
+defn journey_send_buffer(wire: JourneyWire, buffer: ByteBuf) -> Bool {
+    let offset: Int = 0;
+    foreach turn in 0..1000000 {
+        when offset == buffer.len { term true; };
+        when !journey_ready(wire,POLL_OUT) { term false; };
+        let sent: Int = sock_send_once(wire.socket,buffer,offset,buffer.len-offset);
+        when sent <= 0 && sent != -4 && sent != -11 { wire.error = "send"; term false; };
+        when sent > 0 { offset += sent; };
+    };
+    wire.error = "iteration-limit"; term false;
+};
+defn journey_send(wire: JourneyWire, text: String) -> Bool {
+    let buffer: GrowBuf = put_str(grow_new(text .^Length+1),text);
+    let sent: Bool = journey_send_buffer(wire,ByteBuf { ptr: buffer.ptr, len: buffer.len, cap: buffer.cap });
+    grow_free(buffer); term sent;
+};
+defn journey_receive(wire: JourneyWire) -> Bool {
+    when wire.bytes.len == wire.bytes.cap { wire.error = "response-limit"; term false; };
+    foreach turn in 0..1000000 {
+        when !journey_ready(wire,POLL_IN) { term false; };
+        let received: Int = sock_recv_once(wire.socket,wire.bytes,wire.bytes.cap-wire.bytes.len);
+        when received > 0 { term true; };
+        when received != -4 && received != -11 { wire.error = "receive-eof"; term false; };
+    };
+    wire.error = "iteration-limit"; term false;
+};
+defn journey_http_body(wire: JourneyWire) -> String {
+    let frame: HttpResponseFrame = http_response_frame(4096,262144);
+    foreach turn in 0..1000000 {
+        when !journey_receive(wire) { term ""; };
+        let status: Int = http_response_progress(frame,wire.bytes,false);
+        when status < 0 { wire.error = "http-framing"; term ""; };
+        when status > 0 {
+            when frame.status != 200 { wire.error = "http-status-"+frame.status as String; term ""; };
+            term buf_slice_string(wire.bytes,frame.header_bytes,frame.body_bytes);
+        };
+    };
+    wire.error = "iteration-limit"; term "";
+};
+defn journey_http(port: Int, method: String, path: String, body: String) -> String {
+    let wire: JourneyWire = journey_wire(port,30000000000);
+    let request: String = method+" "+path+" HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: "+body .^Length as String+"\r\n\r\n"+body;
+    let response: String = "";
+    when journey_send(wire,request) { response = journey_http_body(wire); };
+    when wire.error .^Length > 0 { println!("transport_error,{}",wire.error); };
+    journey_close(wire); term response;
+};
+defn journey_consume(wire: JourneyWire, count: Int) -> Void {
+    when count < 0 || count > wire.bytes.len { trap; };
+    let remaining: Int = wire.bytes.len-count;
+    foreach index in 0..remaining { Store#(wire.bytes.ptr+index,Load#(wire.bytes.ptr+count+index,1),1); };
+    wire.bytes.len = remaining;
+};
+defn journey_random(wire: JourneyWire, length: Int) -> ByteBuf {
+    let bytes: ByteBuf = buf_new(length);
+    let count: Int = syscall(318,bytes.ptr,length,1);
+    when count != length { wire.error = "entropy"; term bytes; };
+    bytes.len = length; term bytes;
+};
+// Deliberately narrow handshake header profile for the app's canonical reply.
+// Fresh entropy supplies both the handshake nonce and each client frame mask.
+defn journey_upgrade(wire: JourneyWire, token: String) -> Bool {
+    let nonce: ByteBuf = journey_random(wire,16);
+    let key: String = base64_encode(nonce); buf_free(nonce);
+    when !journey_send(wire,"GET /live?token="+token+" HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: "+key+"\r\n\r\n") { term false; };
+    foreach turn in 0..4096 {
+        when !journey_receive(wire) { term false; };
+        let text: String = buf_slice_string(wire.bytes,0,wire.bytes.len);
+        let boundary: Int = str_find(text,"\r\n\r\n");
+        when boundary >= 0 {
+            let header: String = text[0:boundary+4];
+            let expected: String = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: "+ws_accept_key(key)+"\r\n\r\n";
+            when header != expected { wire.error = "upgrade-profile"; term false; };
+            journey_consume(wire,boundary+4); term true;
+        };
+        when wire.bytes.len >= 4096 { wire.error = "upgrade-limit"; term false; };
+    };
+    wire.error = "iteration-limit"; term false;
+};
+defn journey_ws_send(wire: JourneyWire, opcode: Int, text: String) -> Bool {
+    let entropy: ByteBuf = journey_random(wire,4);
+    when entropy.len != 4 { buf_free(entropy); term false; };
+    let mask: Int = Load#(entropy.ptr,4); buf_free(entropy);
+    let frame: GrowBuf = ws_encode(grow_new(text .^Length+16),true,opcode,true,mask,((text as Data) as Int)+8,text .^Length);
+    let sent: Bool = journey_send_buffer(wire,ByteBuf { ptr: frame.ptr, len: frame.len, cap: frame.cap });
+    grow_free(frame); term sent;
+};
+defn journey_ws_next(wire: JourneyWire) -> String {
+    foreach turn in 0..1000000 {
+        let message: WsMessage = ws_message(wire.bytes,0);
+        when message.status == WS_PROTOCOL { wire.error = "ws-framing"; term ""; };
+        when message.status == WS_COMPLETE {
+            let header: WsFrame = unwrap(ws_decode(wire.bytes,0));
+            when header.masked || message.fin != 1 { wire.error = "ws-profile"; term ""; };
+            journey_consume(wire,message.consumed);
+            when message.opcode == WS_OP_TEXT { term message.payload; };
+            when message.opcode == WS_OP_PING {
+                when !journey_ws_send(wire,WS_OP_PONG,message.payload) { term ""; };
+            };
+            when message.opcode != WS_OP_PING && message.opcode != WS_OP_PONG { wire.error = "ws-closed-or-opcode"; term ""; };
+        };
+        when message.status == WS_NEED_MORE && !journey_receive(wire) { term ""; };
+        when now_ns() >= wire.deadline { wire.error = "timeout"; term ""; };
+    };
+    wire.error = "iteration-limit"; term "";
+};

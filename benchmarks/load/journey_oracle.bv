@@ -1,0 +1,67 @@
+import "./journey_values.bv";
+
+obj JourneyExpectation {
+    epoch: String; account: Int; revision: String; generation: String;
+    operation: String; item: Int; rating: Int; rated_count: Int; items: Int;
+};
+obj JourneyStages { accepted: Bool; saved: Bool; predicted: Bool; failed: Bool; };
+
+defn journey_identity(value: JsonValue, expected: JourneyExpectation) -> Bool {
+    term journey_text(journey_member(value,"server_epoch")) == expected.epoch &&
+        journey_int(journey_member(value,"account_id")) == expected.account &&
+        journey_text(journey_member(value,"revision")) == expected.revision;
+};
+defn journey_ranked(value: JsonValue, expected: JourneyExpectation) -> Bool {
+    match value {
+        Array(movies) => {
+            when expected.rated_count < 5 { term movies.Count#() == 0; };
+            when movies.Count#() != 5 { term false; };
+            let previous_score: Float = 6.0; let previous_item: Int = -1;
+            foreach index in 0..movies.Count#() {
+                let movie: JsonValue = movies[index];
+                let item: Int = journey_int(journey_member(movie,"item_id"));
+                let score: Float = journey_number(journey_member(movie,"score"));
+                when item < expected.rated_count || item >= expected.items || !(score >= 1.0 && score <= 5.0) { term false; };
+                when score > previous_score || (score == previous_score && item <= previous_item) { term false; };
+                foreach earlier in 0..index {
+                    when journey_int(journey_member(movies[earlier],"item_id")) == item { term false; };
+                };
+                previous_score = score; previous_item = item;
+            };
+            term true;
+        },
+        _ => false,
+    }
+};
+defn journey_prediction(value: JsonValue, expected: JourneyExpectation) -> Bool {
+    term journey_text(journey_member(value,"model_generation")) == expected.generation &&
+        journey_positive(journey_text(journey_member(value,"job_id"))) &&
+        journey_int(journey_member(value,"attempt")) >= 1 && journey_int(journey_member(value,"attempt")) <= 65535 &&
+        journey_flag(journey_member(value,"cold_start"),expected.rated_count < 5) &&
+        journey_ranked(journey_member(value,"recommendations"),expected);
+};
+// Return 0 for an irrelevant stale event, 1 for a valid matching event and -1
+// for a malformed matching event. Save and prediction can arrive in either
+// order, but neither alone completes an operation. Duplicate events are inert.
+defn journey_event(text: String, expected: JourneyExpectation, stages: JourneyStages) -> Int {
+    let value: JsonValue = journey_document(text);
+    when journey_int(journey_member(value,"v")) != 1 { stages.failed = true; term -1; };
+    when !journey_identity(value,expected) { term 0; };
+    let kind: String = journey_text(journey_member(value,"type"));
+    when kind == "recommendations" {
+        when !journey_prediction(value,expected) { stages.failed = true; term -1; };
+        stages.predicted = true; term 1;
+    };
+    when journey_text(journey_member(value,"operation_id")) != expected.operation { term 0; };
+    when kind == "saved" { stages.saved = true; term 1; };
+    when kind == "accepted" {
+        when journey_int(journey_member(value,"item_id")) != expected.item || journey_int(journey_member(value,"rating")) != expected.rating {
+            stages.failed = true; term -1;
+        };
+        stages.accepted = true; term 1;
+    };
+    stages.failed = true; term -1;
+};
+defn journey_complete(stages: JourneyStages) -> Bool {
+    term stages.accepted && stages.saved && stages.predicted && !stages.failed;
+};

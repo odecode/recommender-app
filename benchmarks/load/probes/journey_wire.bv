@@ -1,0 +1,11 @@
+import "../journey_wire.bv";
+let done: Bool = false;
+node main [!done][done] {
+    let wire: JourneyWire = journey_wire(get_env_int!("LOAD_PORT"),500000000);
+    let good: Bool = journey_upgrade(wire,"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    when good { good = journey_ws_send(wire,WS_OP_TEXT,"client-probe"); };
+    when good { good = journey_ws_next(wire) == "server-probe"; };
+    println!("wire_result,{},{}",good,wire.error);
+    journey_close(wire); done = true;
+    when !good { endprogram 2; }; endprogram;
+};

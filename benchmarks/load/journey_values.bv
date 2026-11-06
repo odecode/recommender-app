@@ -1,0 +1,48 @@
+import "std/json.bv";
+
+// Independent load oracle. A missing, repeated or wrongly typed field cannot
+// satisfy a stage; no server-side protocol implementation is imported.
+defn journey_member(value: JsonValue, key: String) -> JsonValue {
+    match value {
+        Object(pairs) => {
+            let found: Int = 0; let result: JsonValue = Null();
+            foreach index in 0..pairs.Count#() {
+                when pairs[index].0 == key { found += 1; result = pairs[index].1; };
+            };
+            when found != 1 { term Null(); };
+            term result;
+        },
+        _ => Null(),
+    }
+};
+defn journey_text(value: JsonValue) -> String { match value { StrVal(text) => text, _ => "", } };
+defn journey_int(value: JsonValue) -> Int { match value { IntVal(number) => number, _ => -1, } };
+defn journey_number(value: JsonValue) -> Float { match value { FloatVal(number) => number, IntVal(integer) => integer as Float, _ => 0.0, } };
+defn journey_flag(value: JsonValue, expected: Bool) -> Bool { match value { BoolVal(flag) => flag == expected, _ => false, } };
+defn journey_hex(text: String, length: Int) -> Bool {
+    when text .^Length != length { term false; };
+    foreach index in 0..length {
+        let byte: Int = byte_at(text,index);
+        when !((byte >= 48 && byte <= 57) || (byte >= 97 && byte <= 102)) { term false; };
+    };
+    term true;
+};
+defn journey_positive(text: String) -> Bool {
+    when text .^Length < 1 || text .^Length > 19 || byte_at(text,0) == 48 { term false; };
+    foreach index in 0..text .^Length {
+        when byte_at(text,index) < 48 || byte_at(text,index) > 57 { term false; };
+    };
+    when text .^Length < 19 { term true; };
+    let limit: String = "9223372036854775807";
+    foreach index in 0..19 {
+        when byte_at(text,index) < byte_at(limit,index) { term true; };
+        when byte_at(text,index) > byte_at(limit,index) { term false; };
+    };
+    term true;
+};
+defn journey_document(text: String) -> JsonValue {
+    match json_parse(text) { Ok(value) => value, Err(_) => Null(), }
+};
+defn journey_envelope(value: JsonValue, kind: String) -> Bool {
+    term journey_int(journey_member(value,"v")) == 1 && journey_text(journey_member(value,"type")) == kind;
+};
