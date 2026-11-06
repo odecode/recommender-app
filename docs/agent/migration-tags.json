@@ -1,0 +1,42 @@
+[
+  {
+    "tag": "backup/pre-pr-split-2026-10-17",
+    "object": "6a30e8a847b3904b27dd1b78e571c0a247141815",
+    "backup_tag": "migration/2026-11-06/backup/pre-pr-split-2026-10-17"
+  },
+  {
+    "tag": "checkpoint-effect-carry-selection-2026-10-21",
+    "object": "6b897e1cbdbcf60549f435e4f67f54a7e143b1b9",
+    "backup_tag": "migration/2026-11-06/checkpoint-effect-carry-selection-2026-10-21"
+  },
+  {
+    "tag": "compiler-baseline-2026-10-21",
+    "object": "4bd1c8a25fd696ade4e64a03d0c626da15d4f813",
+    "backup_tag": "migration/2026-11-06/compiler-baseline-2026-10-21"
+  },
+  {
+    "tag": "compiler-baseline-2026-10-21-carrier",
+    "object": "5a1a053205a5348b64d346731bc1e5dcfcb85934",
+    "backup_tag": "migration/2026-11-06/compiler-baseline-2026-10-21-carrier"
+  },
+  {
+    "tag": "compiler-baseline-2026-10-23-tail-loop",
+    "object": "42279aafef711339dcba4f614588b9cf9a00a3f0",
+    "backup_tag": "migration/2026-11-06/compiler-baseline-2026-10-23-tail-loop"
+  },
+  {
+    "tag": "effect-shape-followups-2026-10-21",
+    "object": "98f7fc421562fb4f60e616fb8db731afdb1e8f10",
+    "backup_tag": "migration/2026-11-06/effect-shape-followups-2026-10-21"
+  },
+  {
+    "tag": "effect-shape-research-2026-10-21",
+    "object": "5c7e559b707f640faada7a3a2e4eb6a51f6f3787",
+    "backup_tag": "migration/2026-11-06/effect-shape-research-2026-10-21"
+  },
+  {
+    "tag": "milestone/nested-carrier-slots",
+    "object": "5a1a053205a5348b64d346731bc1e5dcfcb85934",
+    "backup_tag": "migration/2026-11-06/milestone/nested-carrier-slots"
+  }
+]

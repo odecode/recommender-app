@@ -1,0 +1,427 @@
+[
+  {
+    "branch": "codex/boolean-short-circuit",
+    "commit": "0af7ae7f043e34fded22b666a11ee50b453f74ca",
+    "backup_branch": "migration/2026-11-06/heads/codex/boolean-short-circuit"
+  },
+  {
+    "branch": "codex/event-trap-liveness",
+    "commit": "37c5cf6ed1b05cd96d4addb7329cede2ad761ef9",
+    "backup_branch": "migration/2026-11-06/heads/codex/event-trap-liveness"
+  },
+  {
+    "branch": "codex/module-metadata-allocation",
+    "commit": "37c5cf6ed1b05cd96d4addb7329cede2ad761ef9",
+    "backup_branch": "migration/2026-11-06/heads/codex/module-metadata-allocation"
+  },
+  {
+    "branch": "codex/module-metadata-clean",
+    "commit": "f713ef453e74520ce8432437081ecd787b12c12b",
+    "backup_branch": "migration/2026-11-06/heads/codex/module-metadata-clean"
+  },
+  {
+    "branch": "codex/pg-receive-carve-draft",
+    "commit": "9030ca5be8b4b550dfb7b5ee1d6390bbdffaf788",
+    "backup_branch": "migration/2026-11-06/heads/codex/pg-receive-carve-draft"
+  },
+  {
+    "branch": "codex/print-traversal",
+    "commit": "f713ef453e74520ce8432437081ecd787b12c12b",
+    "backup_branch": "migration/2026-11-06/heads/codex/print-traversal"
+  },
+  {
+    "branch": "codex/reflection-liveness",
+    "commit": "37c5cf6ed1b05cd96d4addb7329cede2ad761ef9",
+    "backup_branch": "migration/2026-11-06/heads/codex/reflection-liveness"
+  },
+  {
+    "branch": "codex/result-unwrap-carve-draft",
+    "commit": "09efd82911b6f3e10062e22bfadba42d8f3d5008",
+    "backup_branch": "migration/2026-11-06/heads/codex/result-unwrap-carve-draft"
+  },
+  {
+    "branch": "codex/wasm-const-width",
+    "commit": "37c5cf6ed1b05cd96d4addb7329cede2ad761ef9",
+    "backup_branch": "migration/2026-11-06/heads/codex/wasm-const-width"
+  },
+  {
+    "branch": "feat/d-sinks-integration",
+    "commit": "7006b299487a5f4244edd7e7d145a4ee87fc13a3",
+    "backup_branch": "migration/2026-11-06/heads/feat/d-sinks-integration"
+  },
+  {
+    "branch": "feat/fullstack-webapp-demo",
+    "commit": "a9b229b41523e149ad5e26783a29af8b64ae55bb",
+    "backup_branch": "migration/2026-11-06/heads/feat/fullstack-webapp-demo"
+  },
+  {
+    "branch": "feat/http-response-framing",
+    "commit": "400952a2b0d53e4da042cec694da49aa9c9ba476",
+    "backup_branch": "migration/2026-11-06/heads/feat/http-response-framing"
+  },
+  {
+    "branch": "feat/load-collector-prerequisites",
+    "commit": "c403e943905fe814b69ad1b1460a65bd2ce09100",
+    "backup_branch": "migration/2026-11-06/heads/feat/load-collector-prerequisites"
+  },
+  {
+    "branch": "feat/net-bytes-sink-trait",
+    "commit": "4da01fffc790d2d463170085af086dd0599f4b10",
+    "backup_branch": "migration/2026-11-06/heads/feat/net-bytes-sink-trait"
+  },
+  {
+    "branch": "feat/net-db-postgres",
+    "commit": "bfa1e7efbe60d9945d413df72291c25de82103fd",
+    "backup_branch": "migration/2026-11-06/heads/feat/net-db-postgres"
+  },
+  {
+    "branch": "feat/net-socket-tcp",
+    "commit": "d2ecdaf9189919cb08017aeae6109d50fde0e2d5",
+    "backup_branch": "migration/2026-11-06/heads/feat/net-socket-tcp"
+  },
+  {
+    "branch": "feat/net-stack-http-websocket",
+    "commit": "0eb2235ff0d14fef5a25ddfa83ca99764dd2327b",
+    "backup_branch": "migration/2026-11-06/heads/feat/net-stack-http-websocket"
+  },
+  {
+    "branch": "feat/nonblocking-client-transport",
+    "commit": "1eb1d3a0e1dfb4aadfea44cdd5247796e98fe8a5",
+    "backup_branch": "migration/2026-11-06/heads/feat/nonblocking-client-transport"
+  },
+  {
+    "branch": "feat/portable-web-stdlib",
+    "commit": "8e6c8be1e6336ac4ef8cecef83633d02d07e55e3",
+    "backup_branch": "migration/2026-11-06/heads/feat/portable-web-stdlib"
+  },
+  {
+    "branch": "feat/recommender-accounts",
+    "commit": "ad6aea3e9bf3b6956fab373e29ba52e5e0c260f8",
+    "backup_branch": "migration/2026-11-06/heads/feat/recommender-accounts"
+  },
+  {
+    "branch": "feat/recommender-cache",
+    "commit": "25a80f2b9b7382f004c93a9837421a661a7251a1",
+    "backup_branch": "migration/2026-11-06/heads/feat/recommender-cache"
+  },
+  {
+    "branch": "feat/recommender-frontend",
+    "commit": "e656e68487ac02b5bcd74bd968bff90ff06ad5b6",
+    "backup_branch": "migration/2026-11-06/heads/feat/recommender-frontend"
+  },
+  {
+    "branch": "feat/recommender-persistence",
+    "commit": "19be337d4831b830d7829b0faac09e78f9b02eb8",
+    "backup_branch": "migration/2026-11-06/heads/feat/recommender-persistence"
+  },
+  {
+    "branch": "feat/recommender-server",
+    "commit": "c8a45dea695cb78ea911cbc85ecb70337d0116b5",
+    "backup_branch": "migration/2026-11-06/heads/feat/recommender-server"
+  },
+  {
+    "branch": "feat/trait-system-implementation",
+    "commit": "aa410ae9ddad2f404b44e49969e96eda537fb211",
+    "backup_branch": "migration/2026-11-06/heads/feat/trait-system-implementation"
+  },
+  {
+    "branch": "fix/browser-transaction-publication",
+    "commit": "e7dec70994127734e2323d8a8788ef54458111f6",
+    "backup_branch": "migration/2026-11-06/heads/fix/browser-transaction-publication"
+  },
+  {
+    "branch": "fix/callable-transaction-emission",
+    "commit": "f1d79cf1c5c60d8f3520389e1b7bb80a31f717ee",
+    "backup_branch": "migration/2026-11-06/heads/fix/callable-transaction-emission"
+  },
+  {
+    "branch": "fix/collection-assignment-rebind",
+    "commit": "d36841910881c04dc3df4a715e83beda0b4f7cce",
+    "backup_branch": "migration/2026-11-06/heads/fix/collection-assignment-rebind"
+  },
+  {
+    "branch": "fix/collection-index-writes",
+    "commit": "86ca9ef3589d07956ddafb1d9c1830ecd0d2d685",
+    "backup_branch": "migration/2026-11-06/heads/fix/collection-index-writes"
+  },
+  {
+    "branch": "fix/concrete-bit-cast-widths",
+    "commit": "89ed2c8df01ed5766a19f02166f62996dca9d5fb",
+    "backup_branch": "migration/2026-11-06/heads/fix/concrete-bit-cast-widths"
+  },
+  {
+    "branch": "fix/const-string-global",
+    "commit": "bd7910b22ef975d2dc78bc5e2f56c4dca0930f73",
+    "backup_branch": "migration/2026-11-06/heads/fix/const-string-global"
+  },
+  {
+    "branch": "fix/discarded-enum-payloads",
+    "commit": "b8da475b2cb6b724e31587445d417d78efd3c986",
+    "backup_branch": "migration/2026-11-06/heads/fix/discarded-enum-payloads"
+  },
+  {
+    "branch": "fix/dot-call-stateful-state",
+    "commit": "795fe4b03a2be14f15f867ad90fac01f396cc381",
+    "backup_branch": "migration/2026-11-06/heads/fix/dot-call-stateful-state"
+  },
+  {
+    "branch": "fix/enum-field-constructor-context",
+    "commit": "6a09f605ed674931903878369b1d84c267fab6f9",
+    "backup_branch": "migration/2026-11-06/heads/fix/enum-field-constructor-context"
+  },
+  {
+    "branch": "fix/enum-object-layout",
+    "commit": "90e71eebdd1429668b14c091bc905032f69aa6a9",
+    "backup_branch": "migration/2026-11-06/heads/fix/enum-object-layout"
+  },
+  {
+    "branch": "fix/enum-object-projection-lifetime",
+    "commit": "9c4b77c6dd59f82fefb1c68625f36eee3c7bcdd7",
+    "backup_branch": "migration/2026-11-06/heads/fix/enum-object-projection-lifetime"
+  },
+  {
+    "branch": "fix/enum-result-capture",
+    "commit": "a62c5282629111d08d4e405d9d415736c003e948",
+    "backup_branch": "migration/2026-11-06/heads/fix/enum-result-capture"
+  },
+  {
+    "branch": "fix/field-receiver-evaluation",
+    "commit": "22ce21eb7bce22a1cc44904a42fb101cf2121ba0",
+    "backup_branch": "migration/2026-11-06/heads/fix/field-receiver-evaluation"
+  },
+  {
+    "branch": "fix/float-abs-intrinsic",
+    "commit": "507bf262d2ac88dcbf6b7146a588950cd5f6ba86",
+    "backup_branch": "migration/2026-11-06/heads/fix/float-abs-intrinsic"
+  },
+  {
+    "branch": "fix/float-match-payload-check",
+    "commit": "9f49b2f81f5a36ace14c316b5c4b06ca37fa29bb",
+    "backup_branch": "migration/2026-11-06/heads/fix/float-match-payload-check"
+  },
+  {
+    "branch": "fix/float-tuple-destructure",
+    "commit": "219ff076472d98fb50480f10161448d099c361bc",
+    "backup_branch": "migration/2026-11-06/heads/fix/float-tuple-destructure"
+  },
+  {
+    "branch": "fix/generic-call-literal-types",
+    "commit": "367470ac86346784dd1f33ff7f9bec267c7069f4",
+    "backup_branch": "migration/2026-11-06/heads/fix/generic-call-literal-types"
+  },
+  {
+    "branch": "fix/getrandom-borrow-effect",
+    "commit": "94c763f50a01eea5ee107decbc69102caeb3d785",
+    "backup_branch": "migration/2026-11-06/heads/fix/getrandom-borrow-effect"
+  },
+  {
+    "branch": "fix/guarded-tail-return",
+    "commit": "f30520c72754dd73d34179985675843f71448584",
+    "backup_branch": "migration/2026-11-06/heads/fix/guarded-tail-return"
+  },
+  {
+    "branch": "fix/json-parser-progress",
+    "commit": "14f7f6660c87e953c6492fa10a2195d6fa91ab72",
+    "backup_branch": "migration/2026-11-06/heads/fix/json-parser-progress"
+  },
+  {
+    "branch": "fix/lexer-cr-escape",
+    "commit": "d5230b466b1c0ac603709f55bb4202e3644f841a",
+    "backup_branch": "migration/2026-11-06/heads/fix/lexer-cr-escape"
+  },
+  {
+    "branch": "fix/liveness-member-name-collision",
+    "commit": "3ee4e75c8d4317a844829079363ca104d0df750c",
+    "backup_branch": "migration/2026-11-06/heads/fix/liveness-member-name-collision"
+  },
+  {
+    "branch": "fix/llvm-memcpy-intrinsic-declaration",
+    "commit": "acbb90541281f371ecb6bc5a76910d9494a6b9ec",
+    "backup_branch": "migration/2026-11-06/heads/fix/llvm-memcpy-intrinsic-declaration"
+  },
+  {
+    "branch": "fix/malloc-raw-memory-attr",
+    "commit": "75e144eb4078d51ac567ea376874b28959af9b06",
+    "backup_branch": "migration/2026-11-06/heads/fix/malloc-raw-memory-attr"
+  },
+  {
+    "branch": "fix/match-terminating-arm-values",
+    "commit": "23cbbdacea36041b9893f4ad2ad57df43c2b8883",
+    "backup_branch": "migration/2026-11-06/heads/fix/match-terminating-arm-values"
+  },
+  {
+    "branch": "fix/method-call-explicit-receiver",
+    "commit": "4d37455c4a2d97805e088fc5f4327ee4139cd16e",
+    "backup_branch": "migration/2026-11-06/heads/fix/method-call-explicit-receiver"
+  },
+  {
+    "branch": "fix/methodcall-needs-state",
+    "commit": "e8c4476ac951a6618419ee6818e56f4c1a22cd33",
+    "backup_branch": "migration/2026-11-06/heads/fix/methodcall-needs-state"
+  },
+  {
+    "branch": "fix/mixed-width-comparison-operands",
+    "commit": "43671154d36175cc02e4dfaa027335f8d10442aa",
+    "backup_branch": "migration/2026-11-06/heads/fix/mixed-width-comparison-operands"
+  },
+  {
+    "branch": "fix/needs-state-type-dependent-members",
+    "commit": "b6b26104c92ebe75dfb4e10a944428413eaa0be5",
+    "backup_branch": "migration/2026-11-06/heads/fix/needs-state-type-dependent-members"
+  },
+  {
+    "branch": "fix/pg-receive-length",
+    "commit": "db77a61bb1ee530b929a8a7db03e9eacb9bd62c8",
+    "backup_branch": "migration/2026-11-06/heads/fix/pg-receive-length"
+  },
+  {
+    "branch": "fix/pooled-object-assignment",
+    "commit": "e052b07050ce02f3e653a66a725d7e03f880d078",
+    "backup_branch": "migration/2026-11-06/heads/fix/pooled-object-assignment"
+  },
+  {
+    "branch": "fix/ptr-index-provenance",
+    "commit": "c892e71a2748c9d5c946a91a4d9569b26b8ca3b3",
+    "backup_branch": "migration/2026-11-06/heads/fix/ptr-index-provenance"
+  },
+  {
+    "branch": "fix/read-file-descriptor-lifetime",
+    "commit": "6850858a142ae63635feab4aecd515b4b34605ed",
+    "backup_branch": "migration/2026-11-06/heads/fix/read-file-descriptor-lifetime"
+  },
+  {
+    "branch": "fix/relative-import-paths",
+    "commit": "1508e5b02d2b76090b4a58bf321bf46fb6417fb8",
+    "backup_branch": "migration/2026-11-06/heads/fix/relative-import-paths"
+  },
+  {
+    "branch": "fix/result-wrong-side-unwrap",
+    "commit": "dac3aa4aff7633e627d6e04835362474932c56f4",
+    "backup_branch": "migration/2026-11-06/heads/fix/result-wrong-side-unwrap"
+  },
+  {
+    "branch": "fix/sbv-hardware-validator-gate",
+    "commit": "bcac9d91937de8f645cd4eefcb9007ee8b8456c2",
+    "backup_branch": "migration/2026-11-06/heads/fix/sbv-hardware-validator-gate"
+  },
+  {
+    "branch": "fix/socket-borrowing-effects",
+    "commit": "59ec602ea5336df0f148719e6566b4c27f5a2c86",
+    "backup_branch": "migration/2026-11-06/heads/fix/socket-borrowing-effects"
+  },
+  {
+    "branch": "fix/statement-match-fallthrough",
+    "commit": "bb69d28201a57fc5b0845b3fcec86cecdb87d687",
+    "backup_branch": "migration/2026-11-06/heads/fix/statement-match-fallthrough"
+  },
+  {
+    "branch": "fix/stdout-integer-lifetime",
+    "commit": "85161b20a2cac8940b2e5a7ffc49fdd878f9a5a3",
+    "backup_branch": "migration/2026-11-06/heads/fix/stdout-integer-lifetime"
+  },
+  {
+    "branch": "fix/structured-value-lifetimes",
+    "commit": "632f602e97c7a0f901ba997981383e8e027f5a7d",
+    "backup_branch": "migration/2026-11-06/heads/fix/structured-value-lifetimes"
+  },
+  {
+    "branch": "fix/trait-default-effects",
+    "commit": "5a6e5513ebc1f31e21ad3e98bf80d22dc626480a",
+    "backup_branch": "migration/2026-11-06/heads/fix/trait-default-effects"
+  },
+  {
+    "branch": "fix/trait-default-needs-state",
+    "commit": "3f08c05d1edc971e5e5c45795ddd865cf2ca2b4a",
+    "backup_branch": "migration/2026-11-06/heads/fix/trait-default-needs-state"
+  },
+  {
+    "branch": "fix/tuple-field-effects",
+    "commit": "80e5c0993a552f7a60dddb3355247d5ff1eac353",
+    "backup_branch": "migration/2026-11-06/heads/fix/tuple-field-effects"
+  },
+  {
+    "branch": "fix/tuple-value-types",
+    "commit": "05d8aef7696fff7e91cec697fb28881e472d7b9c",
+    "backup_branch": "migration/2026-11-06/heads/fix/tuple-value-types"
+  },
+  {
+    "branch": "fix/wasm32-web-runtime",
+    "commit": "9680e5f8768b0a729349c4a3d64844ab68dd0934",
+    "backup_branch": "migration/2026-11-06/heads/fix/wasm32-web-runtime"
+  },
+  {
+    "branch": "integration/both-fixes",
+    "commit": "ff0b9536ecd45c3a02af4081d70be049d0021bcf",
+    "backup_branch": "migration/2026-11-06/heads/integration/both-fixes"
+  },
+  {
+    "branch": "integration/d-sinks-with-fix",
+    "commit": "69e73d437efcb145104239692a22833a77e2fc26",
+    "backup_branch": "migration/2026-11-06/heads/integration/d-sinks-with-fix"
+  },
+  {
+    "branch": "integration/http-load-final",
+    "commit": "fd52b03fe19a419755d14db0a6f75886bbf6c10f",
+    "backup_branch": "migration/2026-11-06/heads/integration/http-load-final"
+  },
+  {
+    "branch": "integration/http-load-journey",
+    "commit": "044192d428f0bf27536f815479f835f58691e39c",
+    "backup_branch": "migration/2026-11-06/heads/integration/http-load-journey"
+  },
+  {
+    "branch": "integration/load-collector-verified",
+    "commit": "2102ae26672cb65c734ebea8fb8e7ee8ae8e04ea",
+    "backup_branch": "migration/2026-11-06/heads/integration/load-collector-verified"
+  },
+  {
+    "branch": "integration/load-journey-dev",
+    "commit": "9f49b2f81f5a36ace14c316b5c4b06ca37fa29bb",
+    "backup_branch": "migration/2026-11-06/heads/integration/load-journey-dev"
+  },
+  {
+    "branch": "integration/load-journey-main",
+    "commit": "9f49b2f81f5a36ace14c316b5c4b06ca37fa29bb",
+    "backup_branch": "migration/2026-11-06/heads/integration/load-journey-main"
+  },
+  {
+    "branch": "integration/load-journey-verified",
+    "commit": "0adcbba2c26f99633e1a8793238d077759767792",
+    "backup_branch": "migration/2026-11-06/heads/integration/load-journey-verified"
+  },
+  {
+    "branch": "integration/load-transport-development",
+    "commit": "2102ae26672cb65c734ebea8fb8e7ee8ae8e04ea",
+    "backup_branch": "migration/2026-11-06/heads/integration/load-transport-development"
+  },
+  {
+    "branch": "integration/load-transport-verified",
+    "commit": "044192d428f0bf27536f815479f835f58691e39c",
+    "backup_branch": "migration/2026-11-06/heads/integration/load-transport-verified"
+  },
+  {
+    "branch": "integration/recommender-i10-i11",
+    "commit": "2c5940e88f9ddba850ff2dc5fb02ec762a8f0b0d",
+    "backup_branch": "migration/2026-11-06/heads/integration/recommender-i10-i11"
+  },
+  {
+    "branch": "integration/recommender-main-merge",
+    "commit": "c550c98de26f1c1d5f6330dbbaa1b47ff477a84e",
+    "backup_branch": "migration/2026-11-06/heads/integration/recommender-main-merge"
+  },
+  {
+    "branch": "main",
+    "commit": "b9933004ed49bd26e4d064ad829b1aaa7846fbb9",
+    "backup_branch": "migration/2026-11-06/heads/main"
+  },
+  {
+    "branch": "recommender-proof-of-concept",
+    "commit": "77274523eaa7ecf78fbd724d11ecc9bddfa71dd6",
+    "backup_branch": "migration/2026-11-06/heads/recommender-proof-of-concept"
+  },
+  {
+    "branch": "work/task3-snapshot",
+    "commit": "931c3837cd4b2d7752545e88c254c450b5a533b4",
+    "backup_branch": "migration/2026-11-06/heads/work/task3-snapshot"
+  }
+]

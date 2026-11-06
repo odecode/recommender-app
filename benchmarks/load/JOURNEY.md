@@ -68,3 +68,5 @@ capacity curves and long endurance runs remain later checkpoints.
 The shell handles process orchestration and SQL verification. All HTTP,
 WebSocket, workload and event-oracle behavior is Briev using stdlib codecs,
 without importing server validation logic.
+
+See the [verified checkpoint evidence](../../docs/plans/2026-11-06-authenticated-load-journey-results.md) for exact compiler/source pins and results.

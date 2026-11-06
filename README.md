@@ -4,6 +4,15 @@ A browser-based movie recommender with account registration, sign-in, rating,
 and live recommendations. This repository contains the application sources,
 its focused compiler/runtime gates, and the recommender architecture notes.
 
+## Linux migration and current load harness
+
+Start with [the fresh-agent handoff](docs/agent/START-HERE.md) for Linux setup,
+verified compiler pins, reproducible checks, recovery branches and the next
+checkpoint. The load harness now supports scheduled catalogue HTTP requests and
+a bounded authenticated five-rating journey with independent durable receipt
+checks. The compatibility/build notes below retain earlier application history;
+use the handoff's current pin when resuming load work.
+
 ## Build dependency
 
 The Briev compiler and standard library are separate dependencies and are not

@@ -1,0 +1,5 @@
+database=briev_recommender_i01
+role=briev_test
+port=18995
+username=load_1793953328_3759
+worker_generation=1

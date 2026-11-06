@@ -1,10 +1,13 @@
 # Load harness
 
-Work in progress. The arrival scheduler and process sampling primitives are
-implemented, along with a streaming process collector. Its compiler lifetime
-repair passes the memory gate and repeated 5,000-sample self-preflights.
-Network users, reports and the campaign controller are not yet implemented.
-There are no capacity or endurance measurements yet.
+For a fresh Linux setup or a new agent, start with
+[docs/agent/START-HERE.md](../../docs/agent/START-HERE.md).
+
+The scheduler, process sampler/collector, scheduled catalogue HTTP client and
+bounded authenticated five-rating journey are implemented and verified.
+See [HTTP-LOAD.md](HTTP-LOAD.md) and [JOURNEY.md](JOURNEY.md). Multi-user scheduled
+authenticated journeys, campaign reporting, capacity and endurance remain open.
+The sections below describe the accounting and collector foundations.
 
 `metrics.bv` tracks reusable attempt slots and per-operation admission,
 completion, in-flight and outcome counts. Latencies include all completions,
