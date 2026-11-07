@@ -205,3 +205,62 @@ It emits the same collector hash recorded in the final checkpoint. Library
 verification passes 3,459 tests with only the delegated source sweep excluded;
 native and both wasm integrations pass. Full IR determinism passes seven
 programs. The collector memory blocker is closed in the working checkout.
+
+## 2026-11-07 — scheduler/pool integration and a compiler escape fix
+
+Fresh native Linux host (Ubuntu 26.04, Rust 1.99.0, clang-18, PostgreSQL 18,
+database/role `briev_load`). Bootstrap per `docs/agent/START-HERE.md`. Compiler
+checkout at the verified integration pin
+`0adcbba2c26f99633e1a8793238d077759767792`, merged with the fix below.
+Compiler artifact `cf057abbf58efee7a6a60f6c54324dd7b4ee8eb6e51b017de77567a69c61e7c4`
+before the fix; the fixed artifact is
+`e1a5cb056e587001cd759abaf91ae7c04ab2d34b0d647bb2ff367dc986b3efdc`.
+
+Landed in the app (commits `172782a`, `c07e282`, `1480714`):
+
+- `journey_pool.bv` — bounded multi-user accounting. Stage transitions run in
+  order and trap on invalid use; a stage may finish at most once. Arrival lag is
+  kept separate from per-rating timestamps. Ratings are serial per account with
+  explicit ok/rejected/transport/timeout/validation/uncertain outcomes; an
+  uncertain outcome is counted but never measured. Admission/save/prediction
+  histograms reference the acceptance instant. A `RAT_OK` requires accepted,
+  saved and predicted evidence. `journey_pool_gate` (positive) and
+  `journey_pool_limits_gate` (15 invalid-lifecycle cases) pass in `check.sh`.
+- `journey_oracle.bv` — `journey_accepted_revision` learns a positive revision
+  only from the matching account/epoch/operation acceptance (the server revision
+  clock is global across accounts), and `journey_rejection` classifies the
+  explicit `worker-busy` / `operation-pending` overload refusals. Later events
+  still pass through the strict event oracle.
+- `journey_transport.bv` — incremental, nonblocking transport (one send/receive
+  per slot per turn; buffered response framing and coalesced WebSocket frames).
+  Passes the eight controlled peer modes plus connection refusal.
+
+Fresh-host gates are green: `build-journey.sh`, `check-journey.sh` (oracle, eight
+wire + eight transport cases, both refusals), `check.sh` (scheduler, metrics,
+process sampling, collector, journey pool), `check-collector.sh`,
+`build-http.sh`/`check-http.sh`, and `check-http-memory.sh`. The single-user
+journey smoke and its Valgrind pass are green (`journey_ok`,
+`journey_durable_ok`, zero Valgrind errors, zero lost bytes). Fresh server
+`aa04b1aa716d23ef16fc6b079a7cd9e675d485ac80c0f6f46c73e3e53155afeb`.
+
+Compiler defect found while attaching the transport to scheduled users: a
+constructed object stored into a field reached through more than one projection
+of a parameter (`w.mid.inner = Inner { … }`) was emitted as a callee frame image
+whose handle escaped, so the caller read a dangling pointer (a nested transport's
+socket descriptor became garbage). Three cooperating depth-sensitive gaps in
+`destination_ownership` and `reclamation` (store-sink recognition, store
+attribution, and region classification) were fixed on `fix/nested-field-object-escape`
+(from upstream `main`) with four regression tests; PR
+<https://github.com/Randozart/briev-lang/pull/76>. The same change is cherry-picked
+onto the integration branch for app validation. The fix is general: the analyses
+already modelled the depth-1 form.
+
+Remaining: the scheduled multi-user driver (`journey_load.bv`,
+`run-journey-load.sh`, `verify-journey-load.sql`, uncommitted) drives the full
+register→login→hydrate→catalogue→upgrade→five-ratings→logout journey over one
+shared poll set with per-user revisions. It is not yet trusted: the optimized
+build traps inside the progress path while a prints-instrumented build does not,
+and the trap location moves between runs. That is a further compiler
+ownership/codegen investigation, not a harness workaround. The driver, SQL
+evidence and Valgrind gate, and the multi-user overload cases remain before any
+capacity or endurance claim.
