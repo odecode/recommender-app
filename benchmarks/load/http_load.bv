@@ -1,5 +1,8 @@
-import "./http_attempt.bv";
-import "./schedule.bv";
+import "../../tools/briev-load/lib/http_attempt.bv";
+import "../../tools/briev-load/lib/schedule.bv";
+import "../../tools/briev-load/lib/metrics.bv";
+import "std/os/time.bv";
+import "./catalogue.bv";
 
 obj LoadConfig { port: Int; rate: Int; count: Int; slots: Int; timeout: Int; items: Int; };
 obj HttpLoad {
@@ -64,9 +67,20 @@ defn load_poll(load: HttpLoad) -> Int {
     let ready: Int = poll_wait(load.polls,wait);
     when ready < 0 && ready != -4 { term ready; };
     foreach index in 0..load.config.slots {
-        http_attempt_progress(load.slots[index],load.metrics,load.request,poll_events(load.polls,index),load.config.items);
+        load_attempt(load.slots[index],load.metrics,load.request,poll_events(load.polls,index),load.config.items);
     };
     term 0;
+};
+
+defn load_attempt(slot: HttpAttempt, metrics: OperationMetrics, request: ByteBuf, events: Int, items: Int) -> Void {
+    let result: Int = http_attempt_progress(slot,metrics,request,events);
+    when result == 1 {
+        let outcome: Int = OUTCOME_VALIDATION;
+        when catalogue_valid(http_attempt_body(slot),items) { outcome = OUTCOME_OK; };
+        // Validation is included in service latency and must obey the deadline.
+        when now_ns() >= slot.deadline { outcome = OUTCOME_TIMEOUT; };
+        http_attempt_finish(slot,metrics,outcome);
+    };
 };
 
 defn load_run(load: HttpLoad) -> Int {

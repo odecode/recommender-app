@@ -1,3 +1,4 @@
+import "std/net/bytes.bv";
 import "std/json.bv";
 
 // Independent response contract: exactly one movies array, ordered contiguous
@@ -54,4 +55,14 @@ defn catalogue_object(value: JsonValue, expected: Int) -> Bool {
 defn catalogue_valid(text: String, expected: Int) -> Bool {
     when expected < 1 { term false; };
     match json_parse(text) { Ok(value) => catalogue_object(value,expected), Err(_) => false }
+};
+
+// 2026-11-07: the catalogue HTTP request belongs to the scenario, not the
+// generic HTTP attempt (which is protocol-neutral).
+defn catalogue_request() -> ByteBuf {
+    let text: String = "GET /movies HTTP/1.0\r\nHost: localhost\r\nConnection: close\r\n\r\n";
+    let buffer: ByteBuf = buf_new(text .^Length);
+    foreach index in 0..text .^Length { Store#(buffer.ptr+index,text[index],1); };
+    buffer.len = text .^Length;
+    term buffer;
 };

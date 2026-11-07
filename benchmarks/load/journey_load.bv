@@ -1,0 +1,453 @@
+// 2026-11-07: scheduled, bounded multi-user authenticated journeys. The serial
+// smoke client remains unchanged; this driver combines incremental transport,
+// arrival scheduling, independent event validation and pool accounting.
+import "../../tools/briev-load/lib/transport.bv";
+import "./journey_pool.bv";
+import "./journey_oracle.bv";
+import "./catalogue.bv";
+import "../../tools/briev-load/lib/schedule.bv";
+import "std/env.bv";
+
+obj JourneyLoadConfig {
+    port: Int; rate: Int; count: Int; slots: Int; timeout: Int;
+    generation: String; username: String; password: String;
+};
+obj JourneyUser {
+    slot: UserSlot; transport: JourneyTransport; arrival: Int;
+    expected: JourneyExpectation; stages: JourneyStages;
+};
+obj JourneyLoad {
+    config: JourneyLoadConfig; schedule: ArrivalSchedule; accounting: JourneyAccounting;
+    users: List<JourneyUser>; polls: PollSet; last_due: Int;
+};
+
+defn journey_load_safe_credential(text: String) -> Bool {
+    when text .^Length < 8 || text .^Length > 48 { term false; };
+    foreach index in 0..text .^Length {
+        let byte: Int = byte_at(text,index);
+        when !((byte >= 97 && byte <= 122) || (byte >= 48 && byte <= 57) || byte == 45 || byte == 95) { term false; };
+    };
+    term true;
+};
+
+defn journey_load_config() -> JourneyLoadConfig {
+    let port: Int = get_env_int!("LOAD_PORT");
+    let rate: Int = get_env_int!("LOAD_HZ");
+    let count: Int = get_env_int!("LOAD_USERS");
+    let slots: Int = get_env_int!("LOAD_SLOTS");
+    let timeout: Int = get_env_int!("LOAD_TIMEOUT_MS");
+    let generation: String = get_env("LOAD_GENERATION");
+    let username: String = get_env("LOAD_USERNAME");
+    let password: String = get_env("LOAD_PASSWORD");
+    when rate == 0 { rate = 1; };
+    when slots == 0 { slots = 1; };
+    when timeout == 0 { timeout = 30000; };
+    when port < 1 || port > 65535 || rate < 1 || rate > 10000 || count < 1 || count > 10000 ||
+        slots < 1 || slots > 64 || timeout < 1 || timeout > 60000 || !journey_positive(generation) ||
+        !journey_load_safe_credential(username) || !journey_load_safe_credential(password) { trap; };
+    term JourneyLoadConfig { port: port, rate: rate, count: count, slots: slots,
+        timeout: timeout*1000000, generation: generation, username: username, password: password };
+};
+
+defn journey_load_expectation() -> JourneyExpectation {
+    term JourneyExpectation { epoch: "", account: 0, revision: "", generation: "",
+        operation: "", item: 0, rating: 5, rated_count: 0, items: 1682 };
+};
+
+defn journey_load_user(index: Int) -> JourneyUser {
+    term JourneyUser { slot: user_slot(index), transport: journey_transport_new(), arrival: 0,
+        expected: journey_load_expectation(),
+        stages: JourneyStages { accepted: false, saved: false, predicted: false, failed: false } };
+};
+
+defn journey_load_new(config: JourneyLoadConfig) -> JourneyLoad {
+    let users: List<JourneyUser> = [];
+    foreach index in 0..config.slots { users <- journey_load_user(index); };
+    let schedule: ArrivalSchedule = arrival_schedule(now_ns(),config.rate);
+    term JourneyLoad { config: config, schedule: schedule, accounting: journey_accounting(),
+        users: users, polls: unwrap(poll_new(config.slots)),
+        last_due: arrival_due_ns(schedule,config.count-1) };
+};
+
+defn journey_load_reset_expectation(user: JourneyUser) -> Void {
+    user.expected.epoch = ""; user.expected.account = 0; user.expected.revision = "";
+    user.expected.generation = ""; user.expected.operation = ""; user.expected.item = 0;
+    user.expected.rating = 5; user.expected.rated_count = 0; user.expected.items = 1682;
+    user.stages.accepted = false; user.stages.saved = false;
+    user.stages.predicted = false; user.stages.failed = false;
+};
+
+defn journey_load_initial(value: JsonValue, expected: JourneyExpectation, username: String) -> Bool {
+    let profile: JsonValue = journey_member(value,"profile");
+    let ratings: JsonValue = journey_member(value,"ratings");
+    let empty: Bool = false;
+    match ratings { Array(rows) => { empty = rows.Count#() == 0; }, _ => { empty = false; }, };
+    term journey_envelope(value,"state") && journey_identity(profile,expected) &&
+        journey_text(journey_member(value,"username")) == username &&
+        journey_text(journey_member(value,"model_generation")) .^Length > 0 && empty;
+};
+
+defn journey_load_fail(user: JourneyUser, accounting: JourneyAccounting, reason: String) -> Void {
+    when !user.slot.active { term; };
+    let now: Int = now_ns();
+    // user_stage_fail settles a still-pending operation as uncertain. Definite
+    // timeout/rejection/validation outcomes are finished by their callers first.
+    user_stage_fail(user.slot,accounting,user.slot.index as String+":"+reason,now);
+    println!("journey_failed,{},{},{}",user.slot.index,user.slot.stage,reason);
+    stdout_flush();
+};
+
+// nonce is 128 bits of OS entropy encoded as lowercase hex. Combined with the
+// server epoch prefix it is unique across accounts and driver processes without
+// deriving identity from a predictable per-account revision.
+defn journey_load_operation(user: JourneyUser) -> String {
+    let entropy: ByteBuf = journey_transport_random(user.transport,16);
+    when entropy.len != 16 { buf_free(entropy); term ""; };
+    let digits: String = "0123456789abcdef";
+    let nonce: String = "";
+    foreach index in 0..16 {
+        let byte: Int = get_u8(entropy,index);
+        nonce = nonce+digits[byte/16:byte/16+1]+digits[byte%16:byte%16+1];
+    };
+    buf_free(entropy);
+    term user.slot.epoch+nonce;
+};
+
+// The following helpers take accounting explicitly; keeping it out of transport
+// makes every counter transition auditable at the driver boundary.
+defn journey_load_start_http(user: JourneyUser, accounting: JourneyAccounting, config: JourneyLoadConfig,
+    stage: Int, method: String, path: String, body: String) -> Void {
+    user_stage_start(user.slot,accounting,stage,now_ns());
+    journey_transport_http(user.transport,config.port,method,path,body,config.timeout);
+    when user.transport.state == JT_FAILED { journey_load_fail(user,accounting,user.transport.error); };
+};
+
+defn journey_load_start_register(user: JourneyUser, accounting: JourneyAccounting, config: JourneyLoadConfig) -> Void {
+    let credentials: String = "{\"username\":\""+user.slot.username+"\",\"password\":\""+user.slot.password+"\"}";
+    journey_load_start_http(user,accounting,config,JR_REGISTER,"POST","/register",credentials);
+};
+
+defn journey_load_start_login(user: JourneyUser, accounting: JourneyAccounting, config: JourneyLoadConfig) -> Void {
+    let credentials: String = "{\"username\":\""+user.slot.username+"\",\"password\":\""+user.slot.password+"\"}";
+    journey_load_start_http(user,accounting,config,JR_LOGIN,"POST","/login",credentials);
+};
+
+defn journey_load_start_hydrate(user: JourneyUser, accounting: JourneyAccounting, config: JourneyLoadConfig) -> Void {
+    journey_load_start_http(user,accounting,config,JR_HYDRATE,"GET","/state?token="+user.slot.token,"");
+};
+
+defn journey_load_start_catalogue(user: JourneyUser, accounting: JourneyAccounting, config: JourneyLoadConfig) -> Void {
+    journey_load_start_http(user,accounting,config,JR_CATALOGUE,"GET","/movies","");
+};
+
+defn journey_load_start_upgrade(user: JourneyUser, accounting: JourneyAccounting, config: JourneyLoadConfig) -> Void {
+    user_stage_start(user.slot,accounting,JR_UPGRADE,now_ns());
+    journey_transport_upgrade(user.transport,config.port,user.slot.token,config.timeout);
+    when user.transport.state == JT_FAILED { journey_load_fail(user,accounting,user.transport.error); };
+};
+
+defn journey_load_start_logout(user: JourneyUser, accounting: JourneyAccounting, config: JourneyLoadConfig) -> Void {
+    journey_transport_close_socket(user.transport);
+    journey_load_start_http(user,accounting,config,JR_LOGOUT,"POST","/logout?token="+user.slot.token,"");
+};
+
+// Start the next serial rating, or finish the ratings stage after five complete
+// accepted+saved+predicted operations. There is no implicit retry.
+defn journey_load_rating_step(user: JourneyUser, accounting: JourneyAccounting, config: JourneyLoadConfig) -> Void {
+    when !user.slot.active { term; };
+    when user.slot.rated == 5 {
+        user_stage_done(user.slot,accounting,now_ns());
+        journey_load_start_logout(user,accounting,config);
+        term;
+    };
+    let now: Int = now_ns();
+    when now > 9223372036854775807-config.timeout { trap; };
+    user.transport.deadline = now+config.timeout;
+    user.expected.revision = ""; user.slot.revision = "";
+    user.expected.item = user.slot.rated; user.expected.rated_count = user.slot.rated+1;
+    user.expected.rating = 5; user.expected.generation = config.generation;
+    user.stages.accepted = false; user.stages.saved = false;
+    user.stages.predicted = false; user.stages.failed = false;
+    let operation: String = journey_load_operation(user);
+    when operation .^Length != 64 { journey_load_fail(user,accounting,"entropy"); term; };
+    user.expected.operation = operation; user.slot.operation = operation;
+    rating_begin(user.slot,accounting,now,now);
+    let command: String = "{\"v\":1,\"server_epoch\":\""+user.expected.epoch+"\",\"operation_id\":\""+operation+
+        "\",\"item_id\":"+user.expected.item as String+",\"rating\":5}";
+    journey_transport_live_send(user.transport,WS_OP_TEXT,command);
+    when user.transport.state == JT_FAILED { journey_load_fail(user,accounting,user.transport.error); };
+};
+
+defn journey_load_upgrade_complete(user: JourneyUser, accounting: JourneyAccounting, config: JourneyLoadConfig) -> Void {
+    user_stage_done(user.slot,accounting,now_ns());
+    user_stage_start(user.slot,accounting,JR_RATINGS,now_ns());
+    journey_load_rating_step(user,accounting,config);
+};
+
+defn journey_load_http_complete(user: JourneyUser, accounting: JourneyAccounting, config: JourneyLoadConfig) -> Void {
+    when !user.slot.active { term; };
+    let body: String = journey_transport_body(user.transport);
+    when user.transport.response.status != 200 {
+        let reason: String = "http-"+user.transport.response.status as String;
+        let rejection: String = journey_rejection(body);
+        when rejection .^Length > 0 { reason = rejection; };
+        journey_load_fail(user,accounting,reason);
+        term;
+    };
+    let value: JsonValue = journey_document(body);
+    when user.slot.stage == JR_REGISTER {
+        when !journey_envelope(value,"registered") { journey_load_fail(user,accounting,"register-validation"); term; };
+        user_stage_done(user.slot,accounting,now_ns());
+        journey_load_start_login(user,accounting,config);
+        term;
+    };
+    when user.slot.stage == JR_LOGIN {
+        let token: String = journey_text(journey_member(value,"token"));
+        let epoch: String = journey_text(journey_member(value,"server_epoch"));
+        let account: Int = journey_int(journey_member(value,"account_id"));
+        when !journey_envelope(value,"authenticated") || !journey_hex(token,32) || !journey_hex(epoch,32) || account <= 0 ||
+            journey_text(journey_member(value,"username")) != user.slot.username { journey_load_fail(user,accounting,"login-validation"); term; };
+        user.slot.token = token; user.slot.epoch = epoch; user.slot.account = account;
+        user.expected.epoch = epoch; user.expected.account = account; user.expected.revision = "0";
+        user_stage_done(user.slot,accounting,now_ns());
+        journey_load_start_hydrate(user,accounting,config);
+        term;
+    };
+    when user.slot.stage == JR_HYDRATE {
+        when !journey_load_initial(value,user.expected,user.slot.username) { journey_load_fail(user,accounting,"hydrate-validation"); term; };
+        user.slot.snapshot = journey_text(journey_member(value,"model_generation"));
+        user.slot.generation = config.generation; user.expected.generation = config.generation;
+        user_stage_done(user.slot,accounting,now_ns());
+        journey_load_start_catalogue(user,accounting,config);
+        term;
+    };
+    when user.slot.stage == JR_CATALOGUE {
+        when !catalogue_valid(body,1682) { journey_load_fail(user,accounting,"catalogue-validation"); term; };
+        user_stage_done(user.slot,accounting,now_ns());
+        journey_load_start_upgrade(user,accounting,config);
+        term;
+    };
+    when user.slot.stage == JR_LOGOUT {
+        when !journey_envelope(value,"logged-out") { journey_load_fail(user,accounting,"logout-validation"); term; };
+        user_stage_done(user.slot,accounting,now_ns());
+        println!("journey_ok,{},{}",user.slot.index,user.slot.account);
+        stdout_flush();
+        term;
+    };
+    journey_load_fail(user,accounting,"http-state");
+};
+
+defn journey_load_rating_validation(user: JourneyUser, accounting: JourneyAccounting, reason: String) -> Void {
+    when user.slot.pending { rating_finish(user.slot,accounting,RAT_VALIDATION,now_ns()); };
+    journey_load_fail(user,accounting,reason);
+};
+
+defn journey_load_rating_complete(user: JourneyUser, accounting: JourneyAccounting, config: JourneyLoadConfig) -> Void {
+    let now: Int = now_ns();
+    rating_finish(user.slot,accounting,RAT_OK,now);
+    println!("operation,{},{},{},{},{},{},{},{},{},{}",user.slot.account,user.slot.epoch,user.slot.operation,
+        user.slot.revision,user.slot.generation,user.expected.item,
+        user.slot.accepted_ns-user.slot.dispatched_ns,user.slot.saved_ns-user.slot.accepted_ns,
+        user.slot.predicted_ns-user.slot.accepted_ns,now-user.slot.scheduled_ns);
+    stdout_flush();
+    user.slot.rated += 1;
+    journey_load_rating_step(user,accounting,config);
+};
+
+defn journey_load_live_message(user: JourneyUser, accounting: JourneyAccounting,
+    config: JourneyLoadConfig, message: WsMessage) -> Void {
+    when message.opcode == WS_OP_PING {
+        journey_transport_live_send(user.transport,WS_OP_PONG,message.payload);
+        when user.transport.state == JT_FAILED { journey_load_fail(user,accounting,user.transport.error); };
+        term;
+    };
+    when message.opcode == WS_OP_PONG { term; };
+    when message.opcode != WS_OP_TEXT {
+        journey_load_fail(user,accounting,"ws-closed-or-opcode"); term;
+    };
+    when !user.slot.pending { journey_load_rating_validation(user,accounting,"unexpected-event"); term; };
+    let rejection: String = journey_rejection(message.payload);
+    when rejection .^Length > 0 {
+        when user.stages.accepted { journey_load_rating_validation(user,accounting,"late-rejection"); term; };
+        rating_finish(user.slot,accounting,RAT_REJECTED,now_ns());
+        journey_load_fail(user,accounting,rejection);
+        term;
+    };
+    when user.expected.revision .^Length == 0 {
+        let learned: String = journey_accepted_revision(message.payload,user.expected);
+        when learned .^Length > 0 {
+            user.expected.revision = learned; user.slot.revision = learned;
+        };
+        when learned .^Length == 0 {
+            let candidate: JsonValue = journey_document(message.payload);
+            when journey_text(journey_member(candidate,"type")) == "accepted" &&
+                journey_text(journey_member(candidate,"server_epoch")) == user.expected.epoch &&
+                journey_int(journey_member(candidate,"account_id")) == user.expected.account &&
+                journey_text(journey_member(candidate,"operation_id")) == user.expected.operation {
+                journey_load_rating_validation(user,accounting,"accepted-validation"); term;
+            };
+        };
+    };
+    let was_accepted: Bool = user.stages.accepted;
+    let was_saved: Bool = user.stages.saved;
+    let was_predicted: Bool = user.stages.predicted;
+    let result: Int = journey_event(message.payload,user.expected,user.stages);
+    when result < 0 { journey_load_rating_validation(user,accounting,"event-validation"); term; };
+    let now: Int = now_ns();
+    when result == 1 && !was_accepted && user.stages.accepted { rating_accepted(user.slot,accounting,now); };
+    when result == 1 && !was_saved && user.stages.saved { rating_saved(user.slot,accounting,now); };
+    when result == 1 && !was_predicted && user.stages.predicted { rating_predicted(user.slot,accounting,now); };
+    when journey_complete(user.stages) { journey_load_rating_complete(user,accounting,config); };
+};
+
+defn journey_load_drain_live(user: JourneyUser, accounting: JourneyAccounting, config: JourneyLoadConfig) -> Void {
+    // Bound validation work per sweep just like socket work; stale/duplicate
+    // frames cannot starve other users. Remaining bytes stay buffered.
+    foreach message_index in 0..64 {
+        when !user.slot.active || user.transport.state != JT_LIVE { term; };
+        let message: WsMessage = journey_transport_next(user.transport);
+        when user.transport.state == JT_FAILED { journey_load_fail(user,accounting,user.transport.error); term; };
+        when message.status == WS_NEED_MORE { term; };
+        journey_load_live_message(user,accounting,config,message);
+    };
+};
+
+defn journey_load_progress_user(user: JourneyUser, accounting: JourneyAccounting,
+    config: JourneyLoadConfig, events: Int) -> Void {
+    when !user.slot.active { term; };
+    let progress: Int = journey_transport_progress(user.transport,events);
+    when user.transport.state == JT_FAILED {
+        when user.slot.stage == JR_RATINGS && user.slot.pending && user.transport.error == "timeout" {
+            rating_finish(user.slot,accounting,RAT_TIMEOUT,now_ns());
+        };
+        journey_load_fail(user,accounting,user.transport.error);
+        term;
+    };
+    when progress == 1 { journey_load_http_complete(user,accounting,config); term; };
+    when progress == 2 { journey_load_upgrade_complete(user,accounting,config); term; };
+    when user.slot.stage == JR_RATINGS && user.transport.state == JT_LIVE {
+        journey_load_drain_live(user,accounting,config);
+    };
+};
+
+defn journey_load_admit(load: JourneyLoad) -> Void {
+    when load.schedule.offered == load.config.count { term; };
+    let now: Int = now_ns();
+    when now > load.last_due { now = load.last_due; };
+    let batch: ArrivalBatch = arrival_poll(load.schedule,now,load.config.slots-load.accounting.running);
+    accounting_arrival(load.accounting,batch.count+batch.missed,batch.count);
+    let admitted: Int = 0;
+    foreach index in 0..load.config.slots {
+        let user: JourneyUser = load.users[index];
+        when admitted < batch.count && !user.slot.active {
+            let arrival: Int = batch.first+admitted;
+            let scheduled: Int = arrival_due_ns(load.schedule,arrival);
+            let started: Int = now_ns();
+            user_arrive(user.slot,load.accounting,scheduled,started);
+            user.arrival = arrival;
+            user.slot.username = load.config.username+"-"+arrival as String;
+            user.slot.password = load.config.password;
+            journey_load_reset_expectation(user);
+            journey_load_start_register(user,load.accounting,load.config);
+            admitted += 1;
+        };
+    };
+    when admitted != batch.count { trap; };
+};
+
+defn journey_load_poll(load: JourneyLoad) -> Int {
+    let now: Int = now_ns();
+    let wake: Int = now+1000000000;
+    when load.schedule.offered < load.config.count { wake = arrival_due_ns(load.schedule,load.schedule.offered); };
+    foreach index in 0..load.config.slots {
+        let user: JourneyUser = load.users[index];
+        let fd: Int = -1; let events: Int = 0;
+        when user.slot.active {
+            fd = user.transport.socket.fd;
+            events = POLL_IN;
+            when user.transport.state == JT_CONNECT || user.transport.state == JT_HTTP_SEND ||
+                user.transport.state == JT_UPGRADE_SEND || user.transport.state == JT_LIVE_SEND { events = POLL_OUT; };
+            when user.transport.deadline < wake { wake = user.transport.deadline; };
+        };
+        poll_set(load.polls,index,fd,events);
+    };
+    let wait: Int = 0;
+    when wake > now { wait = (wake-now)/1000000+((wake-now)%1000000 != 0) as Int; };
+    let ready: Int = poll_wait(load.polls,wait);
+    when ready < 0 && ready != -4 { term ready; };
+    foreach index in 0..load.config.slots {
+        let user: JourneyUser = load.users[index];
+        when user.slot.active {
+            let events: Int = 0;
+            when ready > 0 { events = poll_events(load.polls,index); };
+            journey_load_progress_user(user,load.accounting,load.config,events);
+        };
+    };
+    term 0;
+};
+
+defn journey_load_run(load: JourneyLoad) -> Int {
+    journey_load_admit(load);
+    when load.schedule.offered == load.config.count && load.accounting.running == 0 { term 0; };
+    let result: Int = journey_load_poll(load);
+    when result < 0 { term result; };
+    term journey_load_run(load);
+};
+
+defn journey_load_histogram(name: String, histogram: Histogram) -> Void {
+    let p50: Int = -1; let p95: Int = -1; let p99: Int = -1;
+    when histogram.count > 0 {
+        p50 = histogram_quantile(histogram,500); p95 = histogram_quantile(histogram,950); p99 = histogram_quantile(histogram,990);
+    };
+    println!("latency,{},{},{},{},{},{},{},{}",name,histogram.count,histogram.width,histogram.overflow,histogram.maximum,p50,p95,p99);
+};
+
+defn journey_load_stage_name(stage: Int) -> String {
+    when stage == JR_REGISTER { term "register"; };
+    when stage == JR_LOGIN { term "login"; };
+    when stage == JR_HYDRATE { term "hydrate"; };
+    when stage == JR_CATALOGUE { term "catalogue"; };
+    when stage == JR_UPGRADE { term "upgrade"; };
+    when stage == JR_RATINGS { term "ratings"; };
+    term "logout";
+};
+
+defn journey_load_report(load: JourneyLoad) -> Void {
+    let accounting: JourneyAccounting = load.accounting;
+    when !journey_accounting_consistent(accounting) || accounting.offered != load.config.count ||
+        accounting.missed != load.schedule.missed || accounting.ratings_inflight != 0 { trap; };
+    println!("summary,offered,missed,running,completed,failed,ratings_started,ratings_done,ok,rejected,transport,timeout,validation,uncertain,elapsed_ns");
+    println!("summary,{},{},{},{},{},{},{},{},{},{},{},{},{},{}",accounting.offered,accounting.missed,
+        accounting.running,accounting.completed,accounting.failed,accounting.ratings_started,accounting.ratings_done,
+        accounting.ratings_ok,accounting.ratings_rejected,accounting.ratings_transport,accounting.ratings_timed_out,
+        accounting.ratings_validation,accounting.ratings_uncertain,now_ns()-load.schedule.start_ns);
+    println!("latency,name,count,width_ns,overflow,max_ns,p50_upper_ns,p95_upper_ns,p99_upper_ns");
+    journey_load_histogram("arrival-lag",accounting.arrival_lag);
+    journey_load_histogram("rating-total",accounting.rating_duration);
+    journey_load_histogram("admission",accounting.phase_admission);
+    journey_load_histogram("durable-save",accounting.phase_save);
+    journey_load_histogram("prediction",accounting.phase_prediction);
+    foreach stage in 1..8 {
+        println!("stage,{},{},{},{},{}",journey_load_stage_name(stage),accounting.stage_started[stage],
+            accounting.stage_done[stage],accounting.stage_failed[stage],accounting.stage_elapsed[stage].count);
+        journey_load_histogram("stage-"+journey_load_stage_name(stage),accounting.stage_elapsed[stage]);
+    };
+};
+
+let done: Bool = false;
+node main [!done][done] {
+    let load: JourneyLoad = journey_load_new(journey_load_config());
+    println!("config,port,hz,users,slots,timeout_ns,ratings_per_user,model_generation");
+    println!("config,{},{},{},{},{},5,{}",load.config.port,load.config.rate,load.config.count,
+        load.config.slots,load.config.timeout,load.config.generation);
+    println!("operation,account,epoch,operation_id,revision,model_generation,item_id,accepted_ns,saved_ns,predicted_ns,complete_ns");
+    stdout_flush();
+    let result: Int = journey_load_run(load);
+    journey_load_report(load);
+    foreach index in 0..load.config.slots { journey_transport_free(load.users[index].transport); };
+    poll_free(load.polls);
+    done = true;
+    when result < 0 { println!("fatal,poll,{}",result); endprogram 70; };
+    when load.accounting.completed != load.config.count || load.accounting.ratings_ok != load.config.count*5 { endprogram 2; };
+    endprogram;
+};

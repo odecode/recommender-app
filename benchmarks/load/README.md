@@ -112,3 +112,27 @@ output are in `target/load-memory`. The isolated probe distinguishes file
 result ownership from collector scheduling, parsing and formatting. This check
 passes all nine cases with the repaired compiler. See
 `docs/plans/2026-11-03-briev-native-load-harness.md` for the dated evidence.
+
+## Repository layout (2026-11-07)
+
+The generic engine now lives in the standalone [briev-load](https://github.com/odecode/briev-load)
+tool, vendored here as the `tools/briev-load` git submodule (pinned commit). It
+owns the arrival scheduler, attempt accounting/histograms, process collector, and
+the protocol-neutral nonblocking HTTP/WebSocket transport.
+
+This directory keeps only the recommender **scenario**: the authenticated
+journey client and independent oracle (`journey*.bv`), the catalogue contract
+(`catalogue.bv`, `http_load.bv`), durable SQL verification, and the server/journey
+runner scripts. Scenario files import the engine through
+`tools/briev-load/lib/*.bv`.
+
+Fresh checkout:
+
+```sh
+git submodule update --init tools/briev-load
+```
+
+`check.sh` delegates the engine gates to `tools/briev-load/check.sh` and then
+gates the recommender pool scenario. `check-memory.sh` and `check-collector.sh`
+delegate to the tool. To add another application, implement a scenario against
+the tool's documented contract; no engine file needs to change.

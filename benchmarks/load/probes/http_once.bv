@@ -1,4 +1,5 @@
-import "../http_attempt.bv";
+import "../../../tools/briev-load/lib/http_attempt.bv";
+import "../catalogue.bv";
 let done: Bool = false;
 node main [!done][done] {
     let slot: HttpAttempt = http_attempt_new();
@@ -13,7 +14,12 @@ node main [!done][done] {
             poll_set(polls,0,slot.socket.fd,events);
             let ready: Int = poll_wait(polls,10);
             when ready < 0 && ready != -4 { trap; };
-            http_attempt_progress(slot,metrics,request,poll_events(polls,0),1);
+            let result: Int = http_attempt_progress(slot,metrics,request,poll_events(polls,0));
+            when result == 1 {
+                let outcome: Int = OUTCOME_VALIDATION;
+                when catalogue_valid(http_attempt_body(slot),1) { outcome = OUTCOME_OK; };
+                http_attempt_finish(slot,metrics,outcome);
+            };
         };
     };
     when slot.attempt.active || metrics.finished != 1 { trap; };

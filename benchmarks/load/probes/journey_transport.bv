@@ -1,4 +1,4 @@
-import "../journey_transport.bv";
+import "../../../tools/briev-load/lib/transport.bv";
 
 // One shared PollSet drives the slot; this probe uses one slot so it can run
 // against the same controlled peer as journey_wire without changing that peer.
