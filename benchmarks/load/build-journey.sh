@@ -7,7 +7,8 @@ export BRIEV_HOME
 out=${JOURNEY_BUILD_DIR:-target/journey}
 mkdir -p "$out"
 for source in benchmarks/load/probes/journey_oracle.bv benchmarks/load/journey.bv \
-    benchmarks/load/probes/journey_wire.bv benchmarks/load/probes/journey_peer.bv; do
+    benchmarks/load/probes/journey_wire.bv benchmarks/load/probes/journey_transport.bv \
+    benchmarks/load/probes/journey_peer.bv; do
     name=$(basename "$source" .bv)
     "$BRIEVC" build "$source" --stdlib-path "$BRIEV_HOME/lib" --config-dir "$BRIEV_HOME/config" \
         --out "$out" > "$out/$name.build.log" 2>&1 || { cat "$out/$name.build.log" >&2; exit 1; }

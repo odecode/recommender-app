@@ -1,0 +1,60 @@
+import "../journey_transport.bv";
+
+// One shared PollSet drives the slot; this probe uses one slot so it can run
+// against the same controlled peer as journey_wire without changing that peer.
+defn transport_pump_once(transport: JourneyTransport, polls: PollSet) -> Bool {
+    when transport.error .^Length > 0 { term false; };
+    let events: Int = POLL_IN;
+    when transport.state == JT_CONNECT || transport.state == JT_HTTP_SEND ||
+        transport.state == JT_UPGRADE_SEND || transport.state == JT_LIVE_SEND { events = POLL_OUT; };
+    poll_set(polls,0,transport.socket.fd,events);
+    let ready: Int = poll_wait(polls,10);
+    when ready < 0 && ready != -4 { journey_transport_fail(transport,"poll-wait"); term false; };
+    let observed: Int = 0;
+    when ready > 0 { observed = poll_events(polls,0); };
+    journey_transport_progress(transport,observed);
+    term transport.error .^Length == 0;
+};
+
+defn transport_pump_until(transport: JourneyTransport, polls: PollSet, state: Int) -> Bool {
+    foreach turn in 0..10000 {
+        when transport.error .^Length > 0 { term false; };
+        when transport.state == state { term true; };
+        when !transport_pump_once(transport,polls) { term false; };
+    };
+    term false;
+};
+
+defn transport_next_text(transport: JourneyTransport, polls: PollSet) -> String {
+    foreach turn in 0..10000 {
+        when transport.error .^Length > 0 { term ""; };
+        when transport.state == JT_LIVE {
+            let message: WsMessage = journey_transport_next(transport);
+            when transport.error .^Length > 0 { term ""; };
+            when message.status == WS_COMPLETE && message.opcode == WS_OP_TEXT { term message.payload; };
+            when message.status == WS_COMPLETE && message.opcode == WS_OP_PING {
+                journey_transport_live_send(transport,WS_OP_PONG,message.payload);
+                when !transport_pump_until(transport,polls,JT_LIVE) { term ""; };
+            };
+            when message.status == WS_COMPLETE && message.opcode != WS_OP_PING && message.opcode != WS_OP_PONG {
+                journey_transport_fail(transport,"ws-opcode"); term "";
+            };
+            when message.status == WS_NEED_MORE && !transport_pump_once(transport,polls) { term ""; };
+        };
+        when transport.state != JT_LIVE && !transport_pump_once(transport,polls) { term ""; };
+    };
+    term "";
+};
+
+let done: Bool = false;
+node main [!done][done] {
+    let transport: JourneyTransport = journey_transport_new();
+    let polls: PollSet = unwrap(poll_new(1));
+    journey_transport_upgrade(transport,get_env_int!("LOAD_PORT"),"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",500000000);
+    let good: Bool = transport_pump_until(transport,polls,JT_LIVE);
+    when good { journey_transport_live_send(transport,WS_OP_TEXT,"client-probe"); good = transport_pump_until(transport,polls,JT_LIVE); };
+    when good { good = transport_next_text(transport,polls) == "server-probe"; };
+    println!("transport_result,{},{}",good,transport.error);
+    poll_free(polls); journey_transport_free(transport);
+    done = true; when !good { endprogram 2; }; endprogram;
+};

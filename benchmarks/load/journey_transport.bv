@@ -1,0 +1,247 @@
+// 2026-11-07: incremental authenticated-journey transport. Unlike
+// journey_wire.bv, no function here waits in poll(2): a driver owns one shared
+// PollSet and advances each bounded slot by at most one socket operation per
+// ready turn. Response/frame codecs and validation stay synchronous and
+// independent of the server implementation.
+import "std/net/nonblocking.bv";
+import "std/net/http_response.bv";
+import "std/net/http.bv";
+import "std/net/websocket.bv";
+import "std/os/poll.bv";
+import "std/os/time.bv";
+
+const JT_CLOSED: Int = 0;
+const JT_CONNECT: Int = 1;
+const JT_HTTP_SEND: Int = 2;
+const JT_HTTP_RECV: Int = 3;
+const JT_HTTP_DONE: Int = 4;
+const JT_UPGRADE_SEND: Int = 5;
+const JT_UPGRADE_RECV: Int = 6;
+const JT_LIVE: Int = 7;
+const JT_LIVE_SEND: Int = 8;
+const JT_FAILED: Int = 9;
+
+const JT_MODE_HTTP: Int = 1;
+const JT_MODE_UPGRADE: Int = 2;
+
+// outgoing remains owned until fully sent and is then retained until the next
+// operation; no view into a reallocated or freed buffer crosses a poll turn.
+obj JourneyTransport {
+    socket: Socket; incoming: ByteBuf; outgoing: GrowBuf;
+    response: HttpResponseFrame; state: Int; mode: Int; sent: Int;
+    deadline: Int; error: String; key: String;
+};
+
+defn journey_transport_new() -> JourneyTransport {
+    term JourneyTransport { socket: Socket { fd: -1 }, incoming: buf_new(266240),
+        outgoing: grow_new(1), response: http_response_frame(4096,262144),
+        state: JT_CLOSED, mode: JT_MODE_HTTP, sent: 0, deadline: 0, error: "", key: "" };
+};
+
+defn journey_transport_close_socket(transport: JourneyTransport) -> Void {
+    when transport.socket.fd >= 0 {
+        let closed: Int = sock_close(transport.socket);
+        // Linux releases the descriptor even when close reports EINTR.
+        when closed != 0 && closed != -4 { trap; };
+        transport.socket.fd = -1;
+    };
+};
+
+defn journey_transport_free(transport: JourneyTransport) -> Void {
+    journey_transport_close_socket(transport);
+    buf_free(transport.incoming);
+    grow_free(transport.outgoing);
+    transport.state = JT_CLOSED;
+};
+
+defn journey_transport_fail(transport: JourneyTransport, reason: String) -> Int {
+    when transport.error .^Length == 0 { transport.error = reason; };
+    transport.state = JT_FAILED;
+    term -1;
+};
+
+defn journey_transport_replace_output(transport: JourneyTransport, output: GrowBuf) -> Void {
+    grow_free(transport.outgoing);
+    transport.outgoing = output;
+    transport.sent = 0;
+};
+
+defn journey_transport_consume(transport: JourneyTransport, count: Int) -> Void {
+    when count < 0 || count > transport.incoming.len { trap; };
+    let remaining: Int = transport.incoming.len-count;
+    foreach index in 0..remaining {
+        Store#(transport.incoming.ptr+index,Load#(transport.incoming.ptr+count+index,1),1);
+    };
+    transport.incoming.len = remaining;
+};
+
+// Start a fresh bounded HTTP exchange. Non-200 responses are complete transport
+// results, not automatic failures: the driver must classify application
+// refusals such as worker-busy separately from malformed or timed-out traffic.
+defn journey_transport_begin(transport: JourneyTransport, port: Int, request: String,
+    timeout: Int, mode: Int) -> Int {
+    when port < 1 || port > 65535 || timeout < 1 ||
+        (mode != JT_MODE_HTTP && mode != JT_MODE_UPGRADE) { trap; };
+    when request .^Length+1 < 1 { trap; };
+    let request_buffer: GrowBuf = grow_new(request .^Length+1);
+    journey_transport_close_socket(transport);
+    transport.incoming.len = 0;
+    http_response_reset(transport.response);
+    transport.error = ""; transport.key = ""; transport.mode = mode;
+    journey_transport_replace_output(transport,put_str(request_buffer,request));
+    let started: Int = now_ns();
+    when started > 9223372036854775807-timeout { trap; };
+    transport.deadline = started+timeout;
+    transport.socket = sock_tcp_nonblocking();
+    when transport.socket.fd < 0 { transport.error = "socket"; transport.state = JT_FAILED; term -1; };
+    let connected: Int = sock_connect(transport.socket,ip_v4(127,0,0,1),port);
+    when connected == 0 {
+        transport.state = JT_HTTP_SEND;
+        when mode == JT_MODE_UPGRADE { transport.state = JT_UPGRADE_SEND; };
+        term 0;
+    };
+    when connected == -115 || connected == -4 { transport.state = JT_CONNECT; term 0; };
+    term journey_transport_fail(transport,"connect");
+};
+
+defn journey_transport_http(transport: JourneyTransport, port: Int, method: String,
+    path: String, body: String, timeout: Int) -> Int {
+    let request: String = method+" "+path+" HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: "+
+        body .^Length as String+"\r\n\r\n"+body;
+    term journey_transport_begin(transport,port,request,timeout,JT_MODE_HTTP);
+};
+
+defn journey_transport_random(transport: JourneyTransport, length: Int) -> ByteBuf {
+    when length < 1 { trap; };
+    let bytes: ByteBuf = buf_new(length);
+    let count: Int = syscall(318,bytes.ptr,length,1);
+    when count != length { journey_transport_fail(transport,"entropy"); term bytes; };
+    bytes.len = length;
+    term bytes;
+};
+
+// The application's canonical 101 response is deliberately strict. Bytes
+// after the header boundary stay buffered because a peer may coalesce its first
+// WebSocket frame with the upgrade response.
+defn journey_transport_upgrade(transport: JourneyTransport, port: Int, token: String, timeout: Int) -> Int {
+    let nonce: ByteBuf = journey_transport_random(transport,16);
+    when nonce.len != 16 { buf_free(nonce); term -1; };
+    let key: String = base64_encode(nonce);
+    buf_free(nonce);
+    let request: String = "GET /live?token="+token+" HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: "+key+"\r\n\r\n";
+    let started: Int = journey_transport_begin(transport,port,request,timeout,JT_MODE_UPGRADE);
+    transport.key = key;
+    term started;
+};
+
+// Queue one masked client frame on an established live connection. The caller
+// retains the operation deadline; queueing a frame never resets its clock.
+defn journey_transport_live_send(transport: JourneyTransport, opcode: Int, text: String) -> Int {
+    when opcode < 0 || opcode > 15 || text .^Length < 0 { trap; };
+    when transport.state != JT_LIVE { term journey_transport_fail(transport,"live-state"); };
+    let entropy: ByteBuf = journey_transport_random(transport,4);
+    when entropy.len != 4 { buf_free(entropy); term -1; };
+    let mask: Int = Load#(entropy.ptr,4);
+    buf_free(entropy);
+    let frame: GrowBuf = ws_encode(grow_new(text .^Length+16),true,opcode,true,mask,
+        ((text as Data) as Int)+8,text .^Length);
+    journey_transport_replace_output(transport,frame);
+    transport.state = JT_LIVE_SEND;
+    term 0;
+};
+
+defn journey_transport_receive(transport: JourneyTransport) -> Int {
+    let available: Int = transport.incoming.cap-transport.incoming.len;
+    when available == 0 { term journey_transport_fail(transport,"response-limit"); };
+    let received: Int = sock_recv_once(transport.socket,transport.incoming,available);
+    when received == -11 || received == -4 { term 0; };
+    when received <= 0 { term journey_transport_fail(transport,"receive-eof"); };
+    term 1;
+};
+
+defn journey_transport_send(transport: JourneyTransport) -> Int {
+    let view: ByteBuf = ByteBuf { ptr: transport.outgoing.ptr, len: transport.outgoing.len, cap: transport.outgoing.cap };
+    let sent: Int = sock_send_once(transport.socket,view,transport.sent,view.len-transport.sent);
+    when sent == -11 || sent == -4 { term 0; };
+    when sent <= 0 { term journey_transport_fail(transport,"send"); };
+    transport.sent += sent;
+    when transport.sent < view.len { term 0; };
+    when transport.state == JT_HTTP_SEND { transport.state = JT_HTTP_RECV; term 0; };
+    when transport.state == JT_UPGRADE_SEND { transport.state = JT_UPGRADE_RECV; term 0; };
+    transport.state = JT_LIVE;
+    term 3;
+};
+
+defn journey_transport_http_progress(transport: JourneyTransport) -> Int {
+    let received: Int = journey_transport_receive(transport);
+    when received <= 0 { term received; };
+    let framed: Int = http_response_progress(transport.response,transport.incoming,false);
+    when framed < 0 { term journey_transport_fail(transport,"http-framing"); };
+    when framed == 0 { term 0; };
+    transport.state = JT_HTTP_DONE;
+    term 1;
+};
+
+defn journey_transport_upgrade_progress(transport: JourneyTransport) -> Int {
+    let received: Int = journey_transport_receive(transport);
+    when received <= 0 { term received; };
+    when transport.incoming.len < 0 { trap; };
+    let text: String = buf_slice_string(transport.incoming,0,transport.incoming.len);
+    let boundary: Int = str_find(text,"\r\n\r\n");
+    when boundary < 0 {
+        when transport.incoming.len >= 4096 { term journey_transport_fail(transport,"upgrade-limit"); };
+        term 0;
+    };
+    let header: String = text[0:boundary+4];
+    let expected: String = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: "+
+        ws_accept_key(transport.key)+"\r\n\r\n";
+    when header != expected { term journey_transport_fail(transport,"upgrade-profile"); };
+    journey_transport_consume(transport,boundary+4);
+    transport.state = JT_LIVE;
+    term 2;
+};
+
+// Return 0 for no completed exchange, 1 for an HTTP response, 2 for an upgrade
+// and 3 for a fully sent live frame. A negative result always names a sticky
+// transport error. Deadline checks happen even without readiness events.
+defn journey_transport_progress(transport: JourneyTransport, events: Int) -> Int {
+    when transport.state == JT_CLOSED || transport.state == JT_HTTP_DONE || transport.state == JT_FAILED { term 0; };
+    when now_ns() >= transport.deadline { term journey_transport_fail(transport,"timeout"); };
+    when events == 0 { term 0; };
+    when (events & POLL_INVALID) != 0 { term journey_transport_fail(transport,"poll"); };
+    when transport.state == JT_CONNECT {
+        when sock_pending_error(transport.socket) != 0 { term journey_transport_fail(transport,"connect"); };
+        transport.state = JT_HTTP_SEND;
+        when transport.mode == JT_MODE_UPGRADE { transport.state = JT_UPGRADE_SEND; };
+    };
+    when transport.state == JT_HTTP_SEND || transport.state == JT_UPGRADE_SEND || transport.state == JT_LIVE_SEND {
+        term journey_transport_send(transport);
+    };
+    when transport.state == JT_HTTP_RECV { term journey_transport_http_progress(transport); };
+    when transport.state == JT_UPGRADE_RECV { term journey_transport_upgrade_progress(transport); };
+    when transport.state == JT_LIVE && (events & POLL_IN) != 0 { term journey_transport_receive(transport); };
+    term 0;
+};
+
+defn journey_transport_body(transport: JourneyTransport) -> String {
+    when transport.state != JT_HTTP_DONE || transport.response.header_bytes < 0 || transport.response.body_bytes < 0 ||
+        transport.response.header_bytes+transport.response.body_bytes > transport.incoming.len { trap; };
+    term buf_slice_string(transport.incoming,transport.response.header_bytes,transport.response.body_bytes);
+};
+
+// Decode at most one already-buffered live message. Receiving remains in
+// journey_transport_progress, so callers can drain coalesced frames without an
+// additional readiness event or a blocking receive.
+defn journey_transport_next(transport: JourneyTransport) -> WsMessage {
+    when transport.state != JT_LIVE { trap; };
+    let message: WsMessage = ws_message(transport.incoming,0);
+    when message.status == WS_PROTOCOL { journey_transport_fail(transport,"ws-framing"); term message; };
+    when message.status != WS_COMPLETE { term message; };
+    let header: WsFrame = unwrap(ws_decode(transport.incoming,0));
+    when header.masked || message.fin != 1 {
+        journey_transport_fail(transport,"ws-profile");
+        term message;
+    };
+    journey_transport_consume(transport,message.consumed);
+    term message;
+};
