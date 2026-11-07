@@ -75,5 +75,10 @@ node main [!done][done] {
     learner.operation = "learn-op";
     when journey_accepted_revision(oracle_event("accepted","0","\"operation_id\":\"learn-op\",\"item_id\":4,\"rating\":5"),learner) .^Length != 0 ||
         journey_accepted_revision(oracle_event("accepted","92","\"operation_id\":\"learn-op\",\"item_id\":4,\"rating\":5,\"revision\":\"93\""),learner) .^Length != 0 { endprogram 28; };
+    when journey_rejection("{\"error\":\"worker-busy\",\"message\":\"retry\"}") != "worker-busy" ||
+        journey_rejection("{\"error\":\"operation-pending\",\"message\":\"resolve\"}") != "operation-pending" { endprogram 29; };
+    when journey_rejection("{\"error\":\"validation\",\"message\":\"bad\"}") .^Length != 0 ||
+        journey_rejection("{\"v\":1,\"error\":\"worker-busy\",\"message\":\"retry\"}") .^Length != 0 ||
+        journey_rejection("{\"error\":\"worker-busy\",\"error\":\"operation-pending\",\"message\":\"retry\"}") .^Length != 0 { endprogram 30; };
     println!("journey_oracle_ok"); done = true; endprogram;
 };

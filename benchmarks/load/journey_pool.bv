@@ -55,7 +55,7 @@ obj UserSlot {
     operation: String; pending: Bool; saved: Bool; predicted: Bool;
     stages_completed: Int; stage_started_ns: Int;
     arrival_scheduled_ns: Int; arrival_started_ns: Int;
-    scheduled_ns: Int; dispatched_ns: Int; accepted_ns: Int;
+    scheduled_ns: Int; dispatched_ns: Int; accepted_ns: Int; saved_ns: Int; predicted_ns: Int;
 };
 
 // One pool per run. offered/missed come from the arrival scheduler feeding a
@@ -80,7 +80,7 @@ defn user_slot(index: Int) -> UserSlot {
         operation: "", pending: false, saved: false, predicted: false,
         stages_completed: 0, stage_started_ns: 0,
         arrival_scheduled_ns: 0, arrival_started_ns: 0, scheduled_ns: 0,
-        dispatched_ns: 0, accepted_ns: -1 };
+        dispatched_ns: 0, accepted_ns: -1, saved_ns: -1, predicted_ns: -1 };
 };
 
 defn journey_accounting() -> JourneyAccounting {
@@ -134,6 +134,7 @@ defn user_arrive(slot: UserSlot, accounting: JourneyAccounting, scheduled_ns: In
     slot.operation = ""; slot.pending = false; slot.saved = false; slot.predicted = false;
     slot.arrival_scheduled_ns = scheduled_ns; slot.arrival_started_ns = now_ns;
     slot.scheduled_ns = 0; slot.dispatched_ns = 0; slot.accepted_ns = -1;
+    slot.saved_ns = -1; slot.predicted_ns = -1;
     slot.stage_started_ns = now_ns; slot.stages_completed = 0;
     histogram_record(accounting.arrival_lag,now_ns-scheduled_ns);
     accounting.running += 1;
@@ -179,6 +180,7 @@ defn rating_begin(slot: UserSlot, accounting: JourneyAccounting, scheduled_ns: I
     when accounting.ratings_started == 9223372036854775807 { trap; };
     slot.pending = true; slot.saved = false; slot.predicted = false;
     slot.dispatched_ns = now_ns; slot.scheduled_ns = scheduled_ns; slot.accepted_ns = -1;
+    slot.saved_ns = -1; slot.predicted_ns = -1;
     accounting.ratings_started += 1;
     accounting.ratings_inflight += 1;
 };
@@ -206,7 +208,7 @@ defn rating_saved(slot: UserSlot, accounting: JourneyAccounting, now_ns: Int) ->
     when !duplicate {
         when slot.accepted_ns < 0 || now_ns < slot.accepted_ns { trap; };
         histogram_record(accounting.phase_save,now_ns-slot.accepted_ns);
-        slot.saved = true;
+        slot.saved = true; slot.saved_ns = now_ns;
     };
 };
 
@@ -215,7 +217,7 @@ defn rating_predicted(slot: UserSlot, accounting: JourneyAccounting, now_ns: Int
     when !duplicate {
         when slot.accepted_ns < 0 || now_ns < slot.accepted_ns { trap; };
         histogram_record(accounting.phase_prediction,now_ns-slot.accepted_ns);
-        slot.predicted = true;
+        slot.predicted = true; slot.predicted_ns = now_ns;
     };
 };
 

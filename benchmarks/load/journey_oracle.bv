@@ -61,6 +61,28 @@ defn journey_accepted_revision(text: String, expected: JourneyExpectation) -> St
     term revision;
 };
 
+// Admission refusals on the live channel are unversioned error objects, not
+// rating events. Classify only the two explicitly retriable overload outcomes;
+// validation, conflicts and save failures must not be mislabeled as capacity.
+// A versioned event always goes through journey_event instead.
+defn journey_rejection(text: String) -> String {
+    let value: JsonValue = journey_document(text);
+    match journey_member(value,"v") {
+        Null() => {
+            match journey_member(value,"type") {
+                Null() => {
+                    let code: String = journey_text(journey_member(value,"error"));
+                    when journey_text(journey_member(value,"message")) .^Length == 0 { term ""; };
+                    when code == "worker-busy" || code == "operation-pending" { term code; };
+                    term "";
+                },
+                _ => "",
+            }
+        },
+        _ => "",
+    }
+};
+
 // Return 0 for an irrelevant stale event, 1 for a valid matching event and -1
 // for a malformed matching event. Save and prediction can arrive in either
 // order, but neither alone completes an operation. Duplicate events are inert.
