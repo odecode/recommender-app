@@ -40,6 +40,27 @@ defn journey_prediction(value: JsonValue, expected: JourneyExpectation) -> Bool 
         journey_flag(journey_member(value,"cold_start"),expected.rated_count < 5) &&
         journey_ranked(journey_member(value,"recommendations"),expected);
 };
+
+// Learn an operation's revision from its own accepted event. The server's
+// revision clock is global across accounts, so a multi-user client cannot
+// predict it as 1,2,3...; only this account/epoch/operation acceptance may
+// unlock the expected revision. Other events, foreign identities and malformed
+// acceptances return the empty string and cannot advance the expectation.
+// Saved/predicted events are still validated by journey_event afterward.
+defn journey_accepted_revision(text: String, expected: JourneyExpectation) -> String {
+    let value: JsonValue = journey_document(text);
+    when journey_int(journey_member(value,"v")) != 1 ||
+        journey_text(journey_member(value,"type")) != "accepted" ||
+        journey_text(journey_member(value,"server_epoch")) != expected.epoch ||
+        journey_int(journey_member(value,"account_id")) != expected.account ||
+        journey_text(journey_member(value,"operation_id")) != expected.operation ||
+        journey_int(journey_member(value,"item_id")) != expected.item ||
+        journey_int(journey_member(value,"rating")) != expected.rating { term ""; };
+    let revision: String = journey_text(journey_member(value,"revision"));
+    when !journey_positive(revision) { term ""; };
+    term revision;
+};
+
 // Return 0 for an irrelevant stale event, 1 for a valid matching event and -1
 // for a malformed matching event. Save and prediction can arrive in either
 // order, but neither alone completes an operation. Duplicate events are inert.

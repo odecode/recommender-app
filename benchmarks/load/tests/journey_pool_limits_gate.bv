@@ -1,0 +1,55 @@
+import "../journey_pool.bv";
+
+// Every CASE number encodes one invalid lifecycle use; each must trap
+// (check.sh runs CASE=1..15 and requires exit 132 with empty stdout). The
+// tail line prints only when a case wrongly succeeds, which is itself a
+// failure. Climb walks one journey legitimately to the running JR_RATINGS
+// stage so later cases exercise guards with real state.
+defn stage_run(slot: UserSlot, accounting: JourneyAccounting, stage: Int) -> Void {
+    user_stage_start(slot,accounting,stage,slot.stage_started_ns+5);
+    user_stage_done(slot,accounting,slot.stage_started_ns+100);
+};
+
+defn climb(slot: UserSlot, accounting: JourneyAccounting) -> Void {
+    stage_run(slot,accounting,JR_REGISTER);
+    stage_run(slot,accounting,JR_LOGIN);
+    stage_run(slot,accounting,JR_HYDRATE);
+    stage_run(slot,accounting,JR_CATALOGUE);
+    stage_run(slot,accounting,JR_UPGRADE);
+    user_stage_start(slot,accounting,JR_RATINGS,slot.stage_started_ns+5);
+};
+
+let done: Bool = false;
+node main [!done][done] {
+    let accounting: JourneyAccounting = journey_accounting();
+    let slot: UserSlot = user_slot(0);
+    let case_id: Int = get_env_int!("CASE");
+    accounting_arrival(accounting,3,3);
+    user_arrive(slot,accounting,100,100);
+    when case_id == 1 { user_arrive(slot,accounting,100,100); };
+    when case_id == 2 { user_stage_start(slot,accounting,JR_LOGIN,110); };
+    when case_id == 3 { user_stage_start(slot,accounting,JR_REGISTER,110); user_stage_start(slot,accounting,JR_REGISTER,110); };
+    when case_id == 4 { user_stage_start(slot,accounting,JR_REGISTER,110); user_stage_done(slot,accounting,100); };
+    when case_id == 5 { user_stage_start(slot,accounting,JR_REGISTER,110); rating_begin(slot,accounting,110,110); };
+    when case_id == 6 { climb(slot,accounting); rating_begin(slot,accounting,640,640); rating_begin(slot,accounting,640,640); };
+    when case_id == 7 { climb(slot,accounting); rating_begin(slot,accounting,640,640); rating_saved(slot,accounting,700); };
+    when case_id == 8 { climb(slot,accounting); rating_begin(slot,accounting,640,640); rating_accepted(slot,accounting,660);
+        rating_saved(slot,accounting,670); rating_predicted(slot,accounting,680);
+        rating_finish(slot,accounting,RAT_OK,700); rating_finish(slot,accounting,RAT_OK,720); };
+    when case_id == 9 { user_stage_fail(slot,accounting,"",110); };
+    when case_id == 10 { climb(slot,accounting); user_stage_done(slot,accounting,140);
+        user_stage_done(slot,accounting,150); };
+    when case_id == 11 { climb(slot,accounting); rating_begin(slot,accounting,640,640);
+        user_stage_done(slot,accounting,700); user_stage_start(slot,accounting,JR_LOGOUT,705);
+        user_stage_done(slot,accounting,800); };
+    when case_id == 12 { accounting_arrival(accounting,5,7); };
+    when case_id == 13 { user_stage_fail(slot,accounting,"transport-fault",110);
+        user_stage_start(slot,accounting,JR_LOGIN,110); };
+    when case_id == 14 { climb(slot,accounting); rating_begin(slot,accounting,640,640);
+        rating_finish(slot,accounting,9,700); };
+    when case_id == 15 { climb(slot,accounting); rating_begin(slot,accounting,640,640);
+        rating_accepted(slot,accounting,660); rating_finish(slot,accounting,RAT_OK,700); };
+    when case_id == 0 { println!("journey_pool_limits_ok"); done = true; endprogram; };
+    println!("unexpected-pass,{}",case_id);
+    done = true; endprogram;
+};

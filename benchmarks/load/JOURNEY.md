@@ -56,6 +56,11 @@ The independent oracle checks payload shape, rating delta, cold-start behavior,
 five unique in-range unrated recommendations, finite scores and ranking order.
 It does not recompute the model's numerical predictions. Duplicate fields fail;
 stale/foreign events cannot complete an operation; failures remain sticky.
+`journey_accepted_revision` additionally learns a positive revision only from
+the matching account/epoch/operation acceptance. This is required for multiple
+identities because the server's revision clock is global; the serial smoke
+client still pins its isolated-server 1–5 expectation. Later saved/predicted
+events continue through the same strict event oracle after revision learning.
 
 Transport is loopback HTTP and the application's exact WebSocket handshake
 profile, with Content-Length bodies, fresh random client nonce/masks, bounded

@@ -1,0 +1,5 @@
+pool,offered,missed,completed,failed
+pool,4,1,1,2,0
+ratings,started,done,inflight,ok,rejected,transport,timeout,validation,uncertain,duration_count
+ratings,6,6,0,2,1,1,1,0,1,5
+journey_pool_ok

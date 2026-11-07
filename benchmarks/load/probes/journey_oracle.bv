@@ -55,5 +55,25 @@ node main [!done][done] {
     when journey_event(saved+"trailing",expected,malformed) != -1 { endprogram 21; };
     expected.rated_count = 4;
     when !journey_ranked(journey_document("[]"),expected) || journey_ranked(journey_document(movies),expected) { endprogram 15; };
+
+    // 2026-11-07: revisions are a global server clock. Learn this account's
+    // next revision from its own acceptance, then keep later event validation
+    // strict; another account's revision must never unlock the expectation.
+    let learner: JourneyExpectation = JourneyExpectation { epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", account: 7,
+        revision: "", generation: "1", operation: "learn-op", item: 4, rating: 5, rated_count: 1, items: 1682 };
+    let global_accepted: String = oracle_event("accepted","92","\"operation_id\":\"learn-op\",\"item_id\":4,\"rating\":5");
+    when journey_accepted_revision(global_accepted,learner) != "92" { endprogram 22; };
+    learner.revision = journey_accepted_revision(global_accepted,learner);
+    let learned: JourneyStages = oracle_stages();
+    when journey_event(global_accepted,learner,learned) != 1 || !learned.accepted { endprogram 23; };
+    when journey_event(oracle_event("saved","92","\"operation_id\":\"learn-op\""),learner,learned) != 1 || !learned.saved { endprogram 24; };
+    when journey_event(oracle_event("saved","93","\"operation_id\":\"learn-op\""),learner,learned) != 0 { endprogram 25; };
+    learner.account = 8;
+    when journey_accepted_revision(global_accepted,learner) .^Length != 0 { endprogram 26; };
+    learner.account = 7; learner.operation = "other-op";
+    when journey_accepted_revision(global_accepted,learner) .^Length != 0 { endprogram 27; };
+    learner.operation = "learn-op";
+    when journey_accepted_revision(oracle_event("accepted","0","\"operation_id\":\"learn-op\",\"item_id\":4,\"rating\":5"),learner) .^Length != 0 ||
+        journey_accepted_revision(oracle_event("accepted","92","\"operation_id\":\"learn-op\",\"item_id\":4,\"rating\":5,\"revision\":\"93\""),learner) .^Length != 0 { endprogram 28; };
     println!("journey_oracle_ok"); done = true; endprogram;
 };

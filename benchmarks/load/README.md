@@ -34,6 +34,25 @@ Poll only at or after that time. `arrival_poll(schedule, now_ns, capacity)`
 returns the first arrival index, number to dispatch and number missed. It
 updates the schedule in place. Time must never move backward.
 
+`journey_pool.bv` (2026-11-06) adds bounded multi-user journey accounting: one
+pool per run, slot-based user states and stage transitions that run exactly in
+the declared order (register → login → hydrate → catalogue → upgrade → ratings
+→ logout). Arrivals the bounded pool cannot admit are counted as missed and
+never queued. Stages and ratings trap on invalid lifecycle use; a stage may
+finish at most once, in order. Rating operations are serial per account with
+explicit outcome classes: ok, rejected, transport, timeout, validation and
+uncertain. Uncertain outcomes (connection loss with a pending operation) are
+counted but never measured — no histogram receives invented samples; pending
+operations finish with an outcome instead of disappearing. Separate
+admission/save/prediction histograms reference the acceptance instant, the
+measurement contract's three denominator surfaces. Arrival timestamps and lag
+remain separate from per-rating timestamps, and a successful rating requires
+accepted, saved and predicted evidence. `journey_pool_gate` pins a
+three-journey synthetic walk (positive) and `journey_pool_limits_gate` traps
+fifteen invalid lifecycle cases (double arrival, stage skip, rating before
+stage, serial violations, duplicate finish, empty failure reason, pending
+logout, dispatched > scheduled, unknown outcome, or success without evidence).
+
 Capacity is the available dispatch budget at that poll, not a connection count.
 Arrivals that exceed it are counted as missed and consumed. This avoids an
 unbounded catch-up queue. The caller must retain separate counts for network

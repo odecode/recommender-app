@@ -44,6 +44,21 @@ for scenario in {1..11}; do
 done
 printf 'PASS metrics lifecycle, timestamps and overflow (11 cases)\n'
 
+# 2026-11-06: journey pool lifecycle — arrivals, stages, serial ratings,
+# overload refusals and uncertain outcomes (increment 1 of the authenticated
+# load checkpoint).
+for scenario in {1..15}; do
+    status=0
+    { CASE="$scenario" timeout 20s "$output/journey_pool_limits_gate" \
+        > "$output/jpool-invalid-$scenario.actual"; } 2> "$output/jpool-invalid-$scenario.stderr" || status=$?
+    if [ "$status" -ne 132 ]; then
+        printf 'FAIL journey pool invalid case %s: exit %s\n' "$scenario" "$status" >&2
+        exit 1
+    fi
+    test ! -s "$output/jpool-invalid-$scenario.actual"
+done
+printf 'PASS journey pool lifecycle, overload and uncertain outcomes (15 cases)\n'
+
 "$compiler" build benchmarks/load/collect.bv --stdlib-path "$compiler_root/lib" \
     --config-dir "$compiler_root/config" --out "$output" > "$output/collect.build.log" 2>&1
 LOAD_PID=0 LOAD_HZ=100 LOAD_SAMPLES=3 timeout 20s "$output/collect" > "$output/collect-self.csv"

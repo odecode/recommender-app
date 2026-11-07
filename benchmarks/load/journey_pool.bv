@@ -1,0 +1,284 @@
+// 2026-11-06: bounded multi-user journey accounting for scheduled
+// authenticated journeys. This module owns user-slot state and measurement
+// only; transport and adversarial event validation stay in journey_wire.bv
+// and journey_oracle.bv. Transitions trap on invalid lifecycle use instead
+// of producing silent samples. Counter discipline mirrors metrics.bv: a
+// counter increments only when bounded by another already-guarded counter
+// (running <= started <= offered, ratings_ok+... <= ratings_done <=
+// ratings_started), so one guard per family prevents wraparound everywhere.
+import "std/stats/histogram.bv";
+
+// Journey stages, in the order the legacy API surface demands them.
+const JR_REGISTER: Int = 1;
+const JR_LOGIN: Int = 2;
+const JR_HYDRATE: Int = 3;
+const JR_CATALOGUE: Int = 4;
+const JR_UPGRADE: Int = 5;
+const JR_RATINGS: Int = 6;
+const JR_LOGOUT: Int = 7;
+
+// Stage status within a journey.
+const JR_WAITING: Int = 0;
+const JR_RUNNING: Int = 1;
+const JR_DONE: Int = 2;
+const JR_FAILED: Int = 3;
+
+// 2026-11-06: outcome classes for one serial rating operation. Definite
+// outcomes contribute a duration sample to rating_duration. An uncertain
+// outcome (connection loss after acceptance, or an ambiguous end needing
+// receipt reconciliation) is counted in its own class but never measured:
+// no histogram receives an invented sample for an operation whose durable
+// truth is unknown.
+const RAT_OK: Int = 1;
+const RAT_REJECTED: Int = 2;
+const RAT_TRANSPORT: Int = 3;
+const RAT_TIMEOUT: Int = 4;
+const RAT_VALIDATION: Int = 5;
+const RAT_UNCERTAIN: Int = 6;
+
+// One millisecond bins with 60 s of direct range; longer stage and laggard
+// observations stay visible through overflow counts and maxima.
+const POOL_WIDTH_NS: Int = 1000000;
+const POOL_BUCKETS: Int = 60001;
+
+// One bounded user journey. Identity fields are filled by the transport
+// driver between stages; revision is learned from the account's own accepted
+// event because the server revision clock is global across accounts, so no
+// revision is predictable before admission. A -1 instant means not observed.
+// Stage and pending-rating instants are separate: rating bookkeeping must
+// never tamper with the stage duration reference.
+obj UserSlot {
+    index: Int; active: Bool; stage: Int; status: Int; error: String;
+    username: String; password: String;
+    token: String; epoch: String; account: Int; snapshot: String; generation: String;
+    revision: String; rated: Int; item: Int;
+    operation: String; pending: Bool; saved: Bool; predicted: Bool;
+    stages_completed: Int; stage_started_ns: Int;
+    arrival_scheduled_ns: Int; arrival_started_ns: Int;
+    scheduled_ns: Int; dispatched_ns: Int; accepted_ns: Int;
+};
+
+// One pool per run. offered/missed come from the arrival scheduler feeding a
+// bounded slot set; every started stage and every definite or uncertain
+// rating outcome is counted here.
+obj JourneyAccounting {
+    offered: Int; missed: Int; running: Int; completed: Int; failed: Int;
+    stage_started: List<Int>; stage_done: List<Int>; stage_failed: List<Int>;
+    stage_elapsed: List<Histogram>;
+    ratings_started: Int; ratings_done: Int; ratings_inflight: Int;
+    ratings_ok: Int; ratings_rejected: Int; ratings_transport: Int;
+    ratings_timed_out: Int; ratings_validation: Int; ratings_uncertain: Int;
+    phase_admission: Histogram; phase_save: Histogram; phase_prediction: Histogram;
+    arrival_lag: Histogram; rating_duration: Histogram;
+};
+
+defn user_slot(index: Int) -> UserSlot {
+    when index < 0 || index > 2147483647 { trap; };
+    term UserSlot { index: index, active: false, stage: 0, status: JR_WAITING, error: "",
+        username: "", password: "", token: "", epoch: "", account: 0,
+        snapshot: "", generation: "", revision: "", rated: 0, item: 0,
+        operation: "", pending: false, saved: false, predicted: false,
+        stages_completed: 0, stage_started_ns: 0,
+        arrival_scheduled_ns: 0, arrival_started_ns: 0, scheduled_ns: 0,
+        dispatched_ns: 0, accepted_ns: -1 };
+};
+
+defn journey_accounting() -> JourneyAccounting {
+    let stage_started: List<Int> = [];
+    let stage_done: List<Int> = [];
+    let stage_failed: List<Int> = [];
+    let stage_elapsed: List<Histogram> = [];
+    foreach stage in 0..8 {
+        stage_started <- 0;
+        stage_done <- 0;
+        stage_failed <- 0;
+        stage_elapsed <- histogram_new(POOL_WIDTH_NS,POOL_BUCKETS);
+    };
+    // Index 0 stays zero; stage identifiers begin at JR_REGISTER and the
+    // range excludes its end, so 0..8 produces exactly 8 entries.
+    term JourneyAccounting { offered: 0, missed: 0, running: 0, completed: 0, failed: 0,
+        stage_started: stage_started, stage_done: stage_done, stage_failed: stage_failed,
+        stage_elapsed: stage_elapsed,
+        ratings_started: 0, ratings_done: 0, ratings_inflight: 0,
+        ratings_ok: 0, ratings_rejected: 0, ratings_transport: 0,
+        ratings_timed_out: 0, ratings_validation: 0, ratings_uncertain: 0,
+        phase_admission: histogram_new(POOL_WIDTH_NS,POOL_BUCKETS),
+        phase_save: histogram_new(POOL_WIDTH_NS,POOL_BUCKETS),
+        phase_prediction: histogram_new(POOL_WIDTH_NS,POOL_BUCKETS),
+        arrival_lag: histogram_new(POOL_WIDTH_NS,POOL_BUCKETS),
+        rating_duration: histogram_new(POOL_WIDTH_NS,POOL_BUCKETS) };
+};
+
+// Scheduled demand counts everything due; dispatched is what the bounded
+// pool admitted right now; the difference is missed and is never queued for
+// unbounded catch-up.
+defn accounting_arrival(accounting: JourneyAccounting, scheduled: Int, dispatched: Int) -> Void {
+    when scheduled < 0 || dispatched < 0 || dispatched > scheduled ||
+        scheduled > 9223372036854775807-accounting.offered ||
+        scheduled-dispatched > 9223372036854775807-accounting.missed { trap; };
+    accounting.offered += scheduled;
+    accounting.missed += scheduled-dispatched;
+};
+
+// Journeys require an offered, not-yet-consumed arrival and an idle slot.
+// Stage counters live in user_stage_start so every stage observation passes
+// one guarded path; user_arrive only claims the slot.
+defn user_arrive(slot: UserSlot, accounting: JourneyAccounting, scheduled_ns: Int, now_ns: Int) -> Void {
+    when slot.active || scheduled_ns < 0 || now_ns < scheduled_ns ||
+        accounting.offered == accounting.missed+accounting.running+accounting.completed+accounting.failed { trap; };
+    when accounting.running == 9223372036854775807 { trap; };
+    slot.active = true; slot.stage = 0; slot.status = JR_RUNNING;
+    slot.error = ""; slot.username = ""; slot.password = "";
+    slot.token = ""; slot.epoch = ""; slot.account = 0; slot.snapshot = ""; slot.generation = "";
+    slot.revision = ""; slot.rated = 0; slot.item = 0;
+    slot.operation = ""; slot.pending = false; slot.saved = false; slot.predicted = false;
+    slot.arrival_scheduled_ns = scheduled_ns; slot.arrival_started_ns = now_ns;
+    slot.scheduled_ns = 0; slot.dispatched_ns = 0; slot.accepted_ns = -1;
+    slot.stage_started_ns = now_ns; slot.stages_completed = 0;
+    histogram_record(accounting.arrival_lag,now_ns-scheduled_ns);
+    accounting.running += 1;
+};
+
+// Stages must run exactly in the declared order; a journey cannot skip or
+// repeat a stage (consecutive stages, positive clock, still-active journey).
+defn user_stage_start(slot: UserSlot, accounting: JourneyAccounting, stage: Int, now_ns: Int) -> Void {
+    when !slot.active || slot.status != JR_RUNNING || stage < JR_REGISTER || stage > JR_LOGOUT ||
+        stage != slot.stage+1 || now_ns < 0 { trap; };
+    slot.stage = stage;
+    slot.stage_started_ns = now_ns; slot.error = "";
+    accounting.stage_started[stage] += 1;
+};
+
+// A stage finish is not a journey finish: only JR_LOGOUT ends a journey.
+// Callers start the next stage explicitly, so a skipped stage can never
+// receive a finished sample. The final stage also requires the account's
+// rating operation to be settled. stages_completed names the highest stage
+// already settled, so each stage may finish at most once and only in order.
+defn user_stage_done(slot: UserSlot, accounting: JourneyAccounting, now_ns: Int) -> Void {
+    when !slot.active || slot.status != JR_RUNNING || now_ns < slot.stage_started_ns ||
+        slot.stages_completed != slot.stage-1 { trap; };
+    accounting.stage_done[slot.stage] += 1;
+    histogram_record(accounting.stage_elapsed[slot.stage],now_ns-slot.stage_started_ns);
+    slot.stages_completed = slot.stage;
+    when slot.stage == JR_LOGOUT {
+        when slot.pending { trap; };
+        slot.active = false; slot.status = JR_DONE;
+        accounting.running -= 1;
+        when accounting.completed == 9223372036854775807 { trap; };
+        accounting.completed += 1;
+    };
+};
+
+// A rating operation is serial per account (the legacy server refuses a
+// second pending operation). The caller owns the intended arrival deadline;
+// retaining scheduled_ns makes total latency start at the intended arrival
+// so generator lag cannot hide inside a rating number.
+defn rating_begin(slot: UserSlot, accounting: JourneyAccounting, scheduled_ns: Int, now_ns: Int) -> Void {
+    when !slot.active || slot.status != JR_RUNNING || slot.stage != JR_RATINGS || slot.pending ||
+        scheduled_ns < 0 || now_ns < scheduled_ns { trap; };
+    when accounting.ratings_started == 9223372036854775807 { trap; };
+    slot.pending = true; slot.saved = false; slot.predicted = false;
+    slot.dispatched_ns = now_ns; slot.scheduled_ns = scheduled_ns; slot.accepted_ns = -1;
+    accounting.ratings_started += 1;
+    accounting.ratings_inflight += 1;
+};
+
+// The accepted event starts the durable and prediction phase clocks. A
+// duplicate acceptance (the profile channel re-acknowledging the same
+// operation) is inert: it must not reset the reference instant or double the
+// admission sample.
+defn rating_accepted(slot: UserSlot, accounting: JourneyAccounting, now_ns: Int) -> Void {
+    let duplicate: Bool = !slot.pending || slot.accepted_ns >= 0 || slot.saved || slot.predicted;
+    when !duplicate {
+        when now_ns < slot.dispatched_ns { trap; };
+        slot.accepted_ns = now_ns;
+        histogram_record(accounting.phase_admission,now_ns-slot.dispatched_ns);
+    };
+};
+
+// Saved and prediction reference the acceptance instant, not dispatch: the
+// contract measures admission, durable save and fresh recommendation
+// separately. Either order is valid and duplicates are inert, so each phase
+// records its first observation only. A save or prediction that arrives
+// without a prior accepted event is a lifecycle bug and traps.
+defn rating_saved(slot: UserSlot, accounting: JourneyAccounting, now_ns: Int) -> Void {
+    let duplicate: Bool = !slot.pending || slot.saved;
+    when !duplicate {
+        when slot.accepted_ns < 0 || now_ns < slot.accepted_ns { trap; };
+        histogram_record(accounting.phase_save,now_ns-slot.accepted_ns);
+        slot.saved = true;
+    };
+};
+
+defn rating_predicted(slot: UserSlot, accounting: JourneyAccounting, now_ns: Int) -> Void {
+    let duplicate: Bool = !slot.pending || slot.predicted;
+    when !duplicate {
+        when slot.accepted_ns < 0 || now_ns < slot.accepted_ns { trap; };
+        histogram_record(accounting.phase_prediction,now_ns-slot.accepted_ns);
+        slot.predicted = true;
+    };
+};
+
+// Every definite outcome completes a started rating and records its duration
+// from the intended arrival; a timeout is a completed, failed attempt, not a
+// disappearance. An uncertain outcome finishes the attempt with no duration
+// and no phase observation. Finishing an already settled operation traps.
+defn rating_finish(slot: UserSlot, accounting: JourneyAccounting, outcome: Int, now_ns: Int) -> Void {
+    when !slot.pending || outcome < RAT_OK || outcome > RAT_UNCERTAIN { trap; };
+    // A durable success requires all three independent observations. Other
+    // definite outcomes may occur before or after acceptance; uncertain loss
+    // alone never manufactures a duration sample.
+    when outcome == RAT_OK && (slot.accepted_ns < 0 || !slot.saved || !slot.predicted) { trap; };
+    when outcome != RAT_UNCERTAIN {
+        when now_ns < slot.scheduled_ns { trap; };
+        histogram_record(accounting.rating_duration,now_ns-slot.scheduled_ns);
+    };
+    slot.pending = false;
+    accounting.ratings_inflight -= 1;
+    accounting.ratings_done += 1;
+    when outcome == RAT_OK { accounting.ratings_ok += 1; };
+    when outcome == RAT_REJECTED { accounting.ratings_rejected += 1; };
+    when outcome == RAT_TRANSPORT { accounting.ratings_transport += 1; };
+    when outcome == RAT_TIMEOUT { accounting.ratings_timed_out += 1; };
+    when outcome == RAT_VALIDATION { accounting.ratings_validation += 1; };
+    when outcome == RAT_UNCERTAIN { accounting.ratings_uncertain += 1; };
+};
+
+// Every failed stage names its cause and terminates the journey: partial
+// journeys stay failed. Elapsed time to a definite outcome is a real
+// measurement, so a failed stage contributes a duration sample too; its
+// outcome stays visible in the failed counter rather than either denominator.
+// Losing the connection while a rating is pending makes that operation
+// uncertain: counted, never measured.
+defn user_stage_fail(slot: UserSlot, accounting: JourneyAccounting, reason: String, now_ns: Int) -> Void {
+    when !slot.active || slot.status == JR_FAILED || reason .^Length == 0 || now_ns < slot.stage_started_ns { trap; };
+    accounting.stage_failed[slot.stage] += 1;
+    histogram_record(accounting.stage_elapsed[slot.stage],now_ns-slot.stage_started_ns);
+    when slot.pending { rating_finish(slot,accounting,RAT_UNCERTAIN,now_ns); };
+    slot.status = JR_FAILED; slot.error = reason;
+    slot.active = false;
+    accounting.running -= 1;
+    when accounting.failed == 9223372036854775807 { trap; };
+    accounting.failed += 1;
+};
+
+// Invariant snapshot for reports and gates: every user is running, completed,
+// failed or missed exactly once; every stage survives as done or failed at
+// most once per start; every started rating survives as exactly one outcome
+// or stays inflight.
+defn journey_accounting_consistent(accounting: JourneyAccounting) -> Bool {
+    let users_accounted: Bool = accounting.offered ==
+        accounting.missed+accounting.running+accounting.completed+accounting.failed;
+    let stages_accounted: Bool = true;
+    foreach stage in 1..8 {
+        when accounting.stage_done[stage]+accounting.stage_failed[stage] > accounting.stage_started[stage] {
+            stages_accounted = false;
+        };
+    };
+    let ratings_accounted: Bool =
+        accounting.ratings_started == accounting.ratings_done+accounting.ratings_inflight &&
+        accounting.ratings_done ==
+            accounting.ratings_ok+accounting.ratings_rejected+accounting.ratings_transport+
+            accounting.ratings_timed_out+accounting.ratings_validation+accounting.ratings_uncertain;
+    term users_accounted && stages_accounted && ratings_accounted;
+};
